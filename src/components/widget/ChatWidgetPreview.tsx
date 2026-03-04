@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { MessageSquare, X, Send, Minus, User } from "lucide-react";
+import { MessageSquare, X, Send, Minus, User, Loader2 } from "lucide-react";
+import { sendChatMessage } from "@/lib/api";
 
 interface WidgetConfig {
   tenantId: string;
@@ -47,6 +48,8 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
     { id: 1, role: "bot", content: config.welcomeMessage, time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) },
   ]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | undefined>();
 
   const needsInfo = config.collectName || config.collectEmail || config.collectPhone;
 
@@ -54,23 +57,43 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
     setStep("chat");
   };
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
     const now = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
     const userMsg: ChatMessage = { id: Date.now(), role: "user", content: input, time: now };
     setMessages((prev) => [...prev, userMsg]);
+    const msgText = input;
     setInput("");
+    setIsLoading(true);
 
-    // Simulate bot response
-    setTimeout(() => {
+    try {
+      const result = await sendChatMessage({
+        tenantId: config.tenantId,
+        message: msgText,
+        conversationId,
+        endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone },
+      });
+
+      if (result.conversation_id) setConversationId(result.conversation_id);
+
       const botMsg: ChatMessage = {
         id: Date.now() + 1,
         role: "bot",
-        content: "Cảm ơn bạn! Tôi đang xử lý yêu cầu của bạn. Vui lòng đợi trong giây lát...",
+        content: result.response,
         time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, botMsg]);
-    }, 1000);
+    } catch (err) {
+      console.error("Chat error:", err);
+      setMessages((prev) => [...prev, {
+        id: Date.now() + 1,
+        role: "bot",
+        content: "Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại.",
+        time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -160,6 +183,14 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                     </div>
                   </div>
                 ))}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="chat-bubble-bot text-xs flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Đang xử lý...
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Input */}
@@ -170,14 +201,16 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSend()}
                     placeholder={config.placeholder}
-                    className="flex-1 rounded-full border px-4 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    disabled={isLoading}
+                    className="flex-1 rounded-full border px-4 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                   />
                   <button
                     onClick={handleSend}
-                    className="h-10 w-10 rounded-full flex items-center justify-center text-white transition-opacity hover:opacity-90"
+                    disabled={isLoading}
+                    className="h-10 w-10 rounded-full flex items-center justify-center text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                     style={{ background: config.primaryColor }}
                   >
-                    <Send className="h-4 w-4" />
+                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
