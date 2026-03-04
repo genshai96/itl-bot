@@ -18,6 +18,7 @@ import {
   useTenant, useTenantConfig, useUpdateTenantConfig,
   useKbDocuments, useToolDefinitions, useConversations, useDeleteTenant,
 } from "@/hooks/use-data";
+import ToolManager from "@/components/tools/ToolManager";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
