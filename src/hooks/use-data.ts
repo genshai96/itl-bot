@@ -205,6 +205,59 @@ export function useToolDefinitions(tenantId: string) {
   });
 }
 
+export function useCreateToolDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (tool: {
+      tenant_id: string;
+      name: string;
+      tool_id: string;
+      description: string;
+      endpoint: string;
+      input_schema?: any;
+      enabled?: boolean;
+    }) => {
+      const { data, error } = await supabase
+        .from("tool_definitions")
+        .insert(tool)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => qc.invalidateQueries({ queryKey: ["tool_definitions", data.tenant_id] }),
+  });
+}
+
+export function useUpdateToolDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: Record<string, any> }) => {
+      const { data, error } = await supabase
+        .from("tool_definitions")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => qc.invalidateQueries({ queryKey: ["tool_definitions", data.tenant_id] }),
+  });
+}
+
+export function useDeleteToolDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, tenantId }: { id: string; tenantId: string }) => {
+      const { error } = await supabase.from("tool_definitions").delete().eq("id", id);
+      if (error) throw error;
+      return tenantId;
+    },
+    onSuccess: (tenantId) => qc.invalidateQueries({ queryKey: ["tool_definitions", tenantId] }),
+  });
+}
+
 // ==================== ANALYTICS ====================
 export function useConversationStats(tenantId?: string) {
   return useQuery({
