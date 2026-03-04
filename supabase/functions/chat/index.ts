@@ -67,17 +67,20 @@ serve(async (req) => {
     // 3. Build enriched message with attachment content
     let enrichedMessage = message || "";
     const imageAttachments: Array<{ type: string; image_url: { url: string } }> = [];
+    let hasKbImportedFiles = false;
 
     if (attachments && Array.isArray(attachments)) {
       for (const att of attachments) {
         if (att.type === "image" && att.content) {
-          // For multimodal: store base64 image for vision models
           imageAttachments.push({
             type: "image_url",
             image_url: { url: att.content },
           });
+        } else if (att.strategy === "kb_imported") {
+          // File was imported to KB — RAG will handle it
+          hasKbImportedFiles = true;
+          if (att.content) enrichedMessage += `\n\n${att.content}`;
         } else if (att.content) {
-          // Text/PDF/CSV content — append to message
           enrichedMessage += `\n\n${att.content}`;
         }
       }
@@ -106,7 +109,6 @@ serve(async (req) => {
     // Replace last user message with enriched version (includes file content)
     if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
       if (imageAttachments.length > 0) {
-        // Multimodal message format for vision models
         (chatMessages[chatMessages.length - 1] as any).content = [
           { type: "text", text: enrichedMessage },
           ...imageAttachments,
