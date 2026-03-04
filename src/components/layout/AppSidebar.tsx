@@ -7,11 +7,13 @@ import {
   Users,
   FileText,
   BarChart3,
+  Building2,
 } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/conversations", label: "Conversations", icon: MessageSquare },
+  { to: "/tenants", label: "Tenants", icon: Building2 },
+  { to: "/conversations", label: "Conversations", icon: MessageSquare, badge: 3 },
   { to: "/knowledge", label: "Knowledge Base", icon: FileText },
   { to: "/agents", label: "Agents", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
@@ -52,9 +54,9 @@ export const AppSidebar = () => {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
-              {item.label === "Conversations" && (
+              {item.badge && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                  3
+                  {item.badge}
                 </span>
               )}
             </NavLink>
@@ -64,15 +66,15 @@ export const AppSidebar = () => {
 
       {/* Tenant selector */}
       <div className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5">
+        <NavLink to="/tenants" className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5 hover:bg-sidebar-accent/80 transition-colors">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20 text-xs font-bold text-sidebar-primary">
             AC
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-sidebar-accent-foreground truncate">Acme Corp</p>
-            <p className="text-[10px] text-sidebar-muted">Tenant ID: acme-001</p>
+            <p className="text-[10px] text-sidebar-muted">4 tenants · Manage →</p>
           </div>
-        </div>
+        </NavLink>
       </div>
     </aside>
   );
