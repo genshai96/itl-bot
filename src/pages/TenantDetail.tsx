@@ -69,10 +69,11 @@ const TenantDetail = () => {
   const [saving, setSaving] = useState(false);
 
   // Test chat state
-  const [testMessages, setTestMessages] = useState<{ role: string; content: string }[]>([]);
+  const [testMessages, setTestMessages] = useState<{ role: string; content: string; imageUrls?: string[] }[]>([]);
   const [testInput, setTestInput] = useState("");
   const [testSending, setTestSending] = useState(false);
   const [testConvId, setTestConvId] = useState<string | undefined>(undefined);
+  const [testAttachments, setTestAttachments] = useState<ChatAttachment[]>([]);
   const testEndRef = useRef<HTMLDivElement>(null);
 
   // Sync DB config to local state
