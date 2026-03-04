@@ -19,6 +19,7 @@ import {
   useKbDocuments, useToolDefinitions, useConversations, useDeleteTenant,
 } from "@/hooks/use-data";
 import ToolManager from "@/components/tools/ToolManager";
+import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
