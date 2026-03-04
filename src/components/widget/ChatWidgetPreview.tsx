@@ -78,7 +78,7 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
 
     try {
       // 1. Upload files to storage
-      let processedAttachments: Array<{ url: string; type: string; content?: string }> = [];
+      let processedAttachments: Array<{ url: string; type: string; content?: string; strategy?: string }> = [];
 
       if (msgAttachments.length > 0) {
         const uploadedUrls: string[] = [];
@@ -100,6 +100,7 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
               url: r.url,
               type: r.type,
               content: r.content,
+              strategy: r.strategy,
             }));
           } catch (err) {
             console.error("Extraction failed:", err);
