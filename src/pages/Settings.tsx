@@ -1,306 +1,140 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { fetchProviderModels, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
-import {
-  Brain,
-  Key,
-  Globe,
-  Shield,
-  Sliders,
-  Save,
-  TestTube,
-  CheckCircle2,
-  RefreshCw,
-  Trash2,
-  Plus,
-} from "lucide-react";
+import { User, Save, Loader2, Shield, Key } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 
 const Settings = () => {
-  const [providerConfig, setProviderConfig] = useState({
-    endpoint: "https://api.openai.com/v1",
-    apiKey: "",
-    model: "",
-    temperature: "0.3",
-    maxTokens: "2048",
-  });
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
-  const [searchModel, setSearchModel] = useState("");
+  const { user } = useAuth();
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [pwOld, setPwOld] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [changingPw, setChangingPw] = useState(false);
 
-  const [tools, setTools] = useState([
-    { id: "check_receivable_by_month", name: "Tra công nợ theo tháng", enabled: true, endpoint: "/v1/tools/receivable/by-month" },
-    { id: "check_receivable_by_sales", name: "Tra công nợ theo sales", enabled: true, endpoint: "/v1/tools/receivable/by-sales" },
-    { id: "check_contract_status", name: "Trạng thái hợp đồng", enabled: false, endpoint: "/v1/tools/contracts/status" },
-  ]);
+  // Load profile
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("user_id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.display_name) setDisplayName(data.display_name);
+      });
+  }, [user]);
 
-  const fetchModelsHandler = async () => {
-    if (!providerConfig.endpoint || !providerConfig.apiKey) {
-      toast.error("Vui lòng nhập endpoint và API key trước");
-      return;
-    }
-    setLoadingModels(true);
-    setConnectionStatus("idle");
+  const saveProfile = async () => {
+    if (!user) return;
+    setLoading(true);
     try {
-      const result = await fetchProviderModels(providerConfig.endpoint, providerConfig.apiKey);
-      setModels(result);
-      setConnectionStatus("success");
-      toast.success(`Tìm thấy ${result.length} models`);
-    } catch (err) {
-      console.error(err);
-      setConnectionStatus("error");
-      toast.error(err instanceof Error ? err.message : "Không thể kết nối tới provider");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ display_name: displayName.trim() })
+        .eq("user_id", user.id);
+      if (error) throw error;
+      toast.success("Đã cập nhật profile");
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi cập nhật");
     } finally {
-      setLoadingModels(false);
+      setLoading(false);
     }
   };
 
-  const testConnection = () => {
-    fetchModelsHandler();
+  const changePassword = async () => {
+    if (pwNew.length < 6) { toast.error("Mật khẩu tối thiểu 6 ký tự"); return; }
+    if (pwNew !== pwConfirm) { toast.error("Mật khẩu không khớp"); return; }
+    setChangingPw(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pwNew });
+      if (error) throw error;
+      toast.success("Đổi mật khẩu thành công");
+      setPwOld(""); setPwNew(""); setPwConfirm("");
+    } catch (err: any) {
+      toast.error(err.message || "Lỗi đổi mật khẩu");
+    } finally {
+      setChangingPw(false);
+    }
   };
 
   return (
     <AdminLayout>
-      <div className="max-w-4xl space-y-8 animate-slide-in">
+      <div className="max-w-2xl space-y-8 animate-slide-in">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-1">Cấu hình tenant, AI provider, tool calling</p>
+          <p className="text-sm text-muted-foreground mt-1">Quản lý tài khoản và bảo mật</p>
         </div>
 
-        <Tabs defaultValue="provider" className="space-y-6">
+        <Tabs defaultValue="profile" className="space-y-6">
           <TabsList className="bg-muted/50">
-            <TabsTrigger value="provider" className="gap-2 text-xs">
-              <Brain className="h-3.5 w-3.5" />
-              AI Provider
-            </TabsTrigger>
-            <TabsTrigger value="tools" className="gap-2 text-xs">
-              <Sliders className="h-3.5 w-3.5" />
-              Tool Calling
-            </TabsTrigger>
-            <TabsTrigger value="security" className="gap-2 text-xs">
-              <Shield className="h-3.5 w-3.5" />
-              Security
-            </TabsTrigger>
+            <TabsTrigger value="profile" className="gap-2 text-xs"><User className="h-3.5 w-3.5" />Profile</TabsTrigger>
+            <TabsTrigger value="security" className="gap-2 text-xs"><Shield className="h-3.5 w-3.5" />Bảo mật</TabsTrigger>
           </TabsList>
 
-          {/* AI Provider Config */}
-          <TabsContent value="provider" className="space-y-6">
+          <TabsContent value="profile" className="space-y-6">
             <div className="rounded-lg border bg-card p-6 space-y-6">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Globe className="h-5 w-5 text-primary" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-lg font-bold text-primary">
+                  {(user?.email || "?").charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold">API Configuration</h3>
-                  <p className="text-xs text-muted-foreground">Cấu hình endpoint, API key và model cho tenant</p>
-                </div>
-                {connectionStatus === "success" && (
-                  <span className="ml-auto flex items-center gap-1.5 text-xs text-success font-medium">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Connected
-                  </span>
-                )}
-              </div>
-
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium">API Endpoint</Label>
-                  <Input
-                    value={providerConfig.endpoint}
-                    onChange={(e) => setProviderConfig({ ...providerConfig, endpoint: e.target.value })}
-                    placeholder="https://api.openai.com/v1"
-                    className="font-mono text-sm h-10"
-                  />
-                  <p className="text-[11px] text-muted-foreground">Hỗ trợ OpenAI-compatible endpoints (OpenRouter, Groq, vLLM, etc.)</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium flex items-center gap-2">
-                    <Key className="h-3.5 w-3.5" />
-                    API Key
-                  </Label>
-                  <Input
-                    type="password"
-                    value={providerConfig.apiKey}
-                    onChange={(e) => setProviderConfig({ ...providerConfig, apiKey: e.target.value })}
-                    placeholder="sk-..."
-                    className="font-mono text-sm h-10"
-                  />
-                </div>
-
-                <div className="flex gap-3">
-                  <Button onClick={testConnection} variant="outline" size="sm" className="gap-2 text-xs">
-                    <TestTube className="h-3.5 w-3.5" />
-                    Test Connection
-                  </Button>
-                  <Button onClick={fetchModelsHandler} variant="outline" size="sm" className="gap-2 text-xs" disabled={loadingModels}>
-                    <RefreshCw className={`h-3.5 w-3.5 ${loadingModels ? "animate-spin" : ""}`} />
-                    Fetch Models
-                  </Button>
-                </div>
-
-                {models.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-medium">Model ({models.length} available)</Label>
-                      <Input
-                        value={searchModel}
-                        onChange={(e) => setSearchModel(e.target.value)}
-                        placeholder="Tìm model..."
-                        className="h-8 w-48 text-xs"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                      {models
-                        .filter((m) => m.id.toLowerCase().includes(searchModel.toLowerCase()))
-                        .map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => setProviderConfig({ ...providerConfig, model: model.id })}
-                          className={`rounded-lg border px-3 py-2 text-left transition-all ${
-                            providerConfig.model === model.id
-                              ? "border-primary bg-primary/5 text-primary"
-                              : "hover:border-primary/30 hover:bg-muted/50"
-                          }`}
-                        >
-                          <p className="text-xs font-mono truncate">{model.id}</p>
-                          {model.owned_by && <p className="text-[10px] text-muted-foreground mt-0.5">{model.owned_by}</p>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Temperature</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      value={providerConfig.temperature}
-                      onChange={(e) => setProviderConfig({ ...providerConfig, temperature: e.target.value })}
-                      className="font-mono text-sm h-10"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Max Tokens</Label>
-                    <Input
-                      type="number"
-                      value={providerConfig.maxTokens}
-                      onChange={(e) => setProviderConfig({ ...providerConfig, maxTokens: e.target.value })}
-                      className="font-mono text-sm h-10"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <Button size="sm" className="gap-2 glow-primary">
-                  <Save className="h-3.5 w-3.5" />
-                  Lưu cấu hình
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* Tool Calling */}
-          <TabsContent value="tools" className="space-y-6">
-            <div className="rounded-lg border bg-card p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Sliders className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold">Tool Allowlist</h3>
-                    <p className="text-xs text-muted-foreground">Quản lý các tool bot được phép gọi</p>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" className="gap-2 text-xs">
-                  <Plus className="h-3.5 w-3.5" />
-                  Thêm tool
-                </Button>
-              </div>
-
-              <div className="space-y-3">
-                {tools.map((tool) => (
-                  <div key={tool.id} className="flex items-center justify-between rounded-lg border px-4 py-3.5 hover:bg-muted/30 transition-colors">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{tool.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono">{tool.endpoint}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Switch
-                        checked={tool.enabled}
-                        onCheckedChange={(checked) => {
-                          setTools(tools.map((t) => t.id === tool.id ? { ...t, enabled: checked } : t));
-                        }}
-                      />
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* Security */}
-          <TabsContent value="security" className="space-y-6">
-            <div className="rounded-lg border bg-card p-6 space-y-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Shield className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold">Security & Guardrails</h3>
-                  <p className="text-xs text-muted-foreground">Policy engine và giới hạn bảo mật</p>
+                  <p className="text-sm font-semibold">{user?.email}</p>
+                  <p className="text-xs text-muted-foreground">ID: {user?.id?.slice(0, 8)}...</p>
                 </div>
               </div>
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Confidence Threshold (Handoff)</Label>
-                  <Input type="number" step="0.05" min="0" max="1" defaultValue="0.6" className="font-mono text-sm h-10 max-w-xs" />
-                  <p className="text-[11px] text-muted-foreground">Bot sẽ chuyển agent khi confidence dưới ngưỡng này</p>
+                  <Label className="text-xs">Email</Label>
+                  <Input value={user?.email || ""} readOnly className="h-10 bg-muted/50" />
                 </div>
-
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Max Tool Retries</Label>
-                  <Input type="number" min="0" max="5" defaultValue="2" className="font-mono text-sm h-10 max-w-xs" />
-                  <p className="text-[11px] text-muted-foreground">Số lần retry tối đa khi tool call fail trước khi handoff</p>
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium">PII Masking</p>
-                    <p className="text-xs text-muted-foreground">Tự động ẩn thông tin nhạy cảm trong log</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium">Prompt Injection Defense</p>
-                    <p className="text-xs text-muted-foreground">Lọc và chặn các prompt injection attempt</p>
-                  </div>
-                  <Switch defaultChecked />
+                  <Label className="text-xs">Tên hiển thị</Label>
+                  <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Tên hiển thị" className="h-10" maxLength={100} />
                 </div>
               </div>
 
-              <div className="flex justify-end pt-2">
-                <Button size="sm" className="gap-2 glow-primary">
-                  <Save className="h-3.5 w-3.5" />
-                  Lưu cấu hình
+              <div className="flex justify-end">
+                <Button size="sm" className="gap-2 glow-primary" onClick={saveProfile} disabled={loading}>
+                  {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  Lưu
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="security" className="space-y-6">
+            <div className="rounded-lg border bg-card p-6 space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10"><Key className="h-5 w-5 text-primary" /></div>
+                <div>
+                  <h3 className="text-sm font-semibold">Đổi mật khẩu</h3>
+                  <p className="text-xs text-muted-foreground">Cập nhật mật khẩu tài khoản</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs">Mật khẩu mới</Label>
+                  <Input type="password" value={pwNew} onChange={(e) => setPwNew(e.target.value)} placeholder="••••••••" className="h-10" minLength={6} />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Xác nhận mật khẩu</Label>
+                  <Input type="password" value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} placeholder="••••••••" className="h-10" minLength={6} />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button size="sm" className="gap-2 glow-primary" onClick={changePassword} disabled={changingPw}>
+                  {changingPw ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Key className="h-3.5 w-3.5" />}
+                  Đổi mật khẩu
                 </Button>
               </div>
             </div>

@@ -1,21 +1,28 @@
 import AdminLayout from "@/components/layout/AdminLayout";
-import { Users, Shield, Bot } from "lucide-react";
+import { Users, Shield, Bot, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-const agents = [
-  { id: 1, name: "Trần Minh Đức", role: "Support Agent", status: "online", activeChats: 3 },
-  { id: 2, name: "Lê Thị Hương", role: "Support Lead", status: "online", activeChats: 1 },
-  { id: 3, name: "Nguyễn Hoàng Nam", role: "Support Agent", status: "away", activeChats: 0 },
-  { id: 4, name: "AI Bot", role: "AI Bot", status: "online", activeChats: 12, isBot: true },
-];
-
-const statusColors: Record<string, string> = {
-  online: "bg-success",
-  away: "bg-warning",
-  offline: "bg-muted-foreground",
-};
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 
 const Agents = () => {
+  const { data: roles, isLoading } = useQuery({
+    queryKey: ["user_roles_agents"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("*, profiles!inner(display_name, user_id)")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const statusColors: Record<string, string> = {
+    online: "bg-success",
+    away: "bg-warning",
+    offline: "bg-muted-foreground",
+  };
+
   return (
     <AdminLayout>
       <div className="space-y-8 animate-slide-in">
@@ -24,38 +31,39 @@ const Agents = () => {
             <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
             <p className="text-sm text-muted-foreground mt-1">Quản lý support agents và phân quyền</p>
           </div>
-          <Button size="sm" className="gap-2 glow-primary">
-            <Users className="h-3.5 w-3.5" />
-            Thêm agent
-          </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {agents.map((agent) => (
-            <div key={agent.id} className="stat-card flex items-center gap-4">
-              <div className="relative">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold ${
-                  agent.isBot ? "bg-primary/10 text-primary" : "bg-muted"
-                }`}>
-                  {agent.isBot ? <Bot className="h-6 w-6" /> : agent.name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (!roles || roles.length === 0) ? (
+          <div className="text-center py-12 text-sm text-muted-foreground">
+            Chưa có agent nào được gán role. Vui lòng gán role cho user trong database.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {roles.map((role) => (
+              <div key={role.id} className="stat-card flex items-center gap-4">
+                <div className="relative">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold">
+                    {((role as any).profiles?.display_name || "?").split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase()}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-success" />
                 </div>
-                <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card ${statusColors[agent.status]}`} />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold">{agent.name}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Shield className="h-3 w-3" />
-                    {agent.role}
-                  </span>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground">{agent.activeChats} chat đang xử lý</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold">{(role as any).profiles?.display_name || role.user_id.slice(0, 8)}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Shield className="h-3 w-3" />
+                      {role.role}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <Button variant="outline" size="sm" className="text-xs">Chi tiết</Button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </AdminLayout>
   );
