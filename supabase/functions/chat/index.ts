@@ -64,11 +64,30 @@ serve(async (req) => {
       convId = conv.id;
     }
 
-    // 3. Save user message
+    // 3. Build enriched message with attachment content
+    let enrichedMessage = message || "";
+    const imageAttachments: Array<{ type: string; image_url: { url: string } }> = [];
+
+    if (attachments && Array.isArray(attachments)) {
+      for (const att of attachments) {
+        if (att.type === "image" && att.content) {
+          // For multimodal: store base64 image for vision models
+          imageAttachments.push({
+            type: "image_url",
+            image_url: { url: att.content },
+          });
+        } else if (att.content) {
+          // Text/PDF/CSV content — append to message
+          enrichedMessage += `\n\n${att.content}`;
+        }
+      }
+    }
+
+    // Save user message (text only, not base64)
     await supabase.from("messages").insert({
       conversation_id: convId,
       role: "user",
-      content: message,
+      content: message || "[attachment]",
     });
 
     // 4. Get conversation history
@@ -79,10 +98,23 @@ serve(async (req) => {
       .order("created_at", { ascending: true })
       .limit(20);
 
-    const chatMessages = (history || []).map((m) => ({
-      role: m.role === "bot" ? "assistant" : m.role === "user" ? "user" : "system",
-      content: m.content,
-    }));
+    const chatMessages = (history || []).map((m) => {
+      const role = m.role === "bot" ? "assistant" : m.role === "user" ? "user" : "system";
+      return { role, content: m.content };
+    });
+
+    // Replace last user message with enriched version (includes file content)
+    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
+      if (imageAttachments.length > 0) {
+        // Multimodal message format for vision models
+        (chatMessages[chatMessages.length - 1] as any).content = [
+          { type: "text", text: enrichedMessage },
+          ...imageAttachments,
+        ];
+      } else {
+        chatMessages[chatMessages.length - 1].content = enrichedMessage;
+      }
+    }
 
     // 5. RAG: Search knowledge base for relevant context
     let ragContext = "";
