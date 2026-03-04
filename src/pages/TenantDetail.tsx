@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { fetchProviderModels, type ModelInfo } from "@/lib/api";
+import { fetchProviderModels, sendChatMessage, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,15 +11,19 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useTenant, useTenantConfig, useUpdateTenantConfig,
-  useKbDocuments, useToolDefinitions, useConversations,
+  useKbDocuments, useToolDefinitions, useConversations, useDeleteTenant,
 } from "@/hooks/use-data";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
   ArrowLeft, Brain, Code2, Copy, Check, FileText, Globe, Key,
   Palette, Save, Settings, Shield, Sliders, TestTube,
-  Trash2, Eye, CheckCircle2, User, Loader2,
+  Trash2, User, Loader2, CheckCircle2, Send, Bot, MessageSquare,
 } from "lucide-react";
 
 const TenantDetail = () => {
@@ -34,6 +38,9 @@ const TenantDetail = () => {
   const { data: toolDefs } = useToolDefinitions(tenantId || "");
   const { data: conversations } = useConversations(tenantId);
   const updateConfig = useUpdateTenantConfig();
+  const deleteTenantMut = useDeleteTenant();
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Local state synced from DB
   const [provider, setProvider] = useState({
@@ -57,6 +64,13 @@ const TenantDetail = () => {
   const [connectionOk, setConnectionOk] = useState(false);
   const [searchModel, setSearchModel] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Test chat state
+  const [testMessages, setTestMessages] = useState<{ role: string; content: string }[]>([]);
+  const [testInput, setTestInput] = useState("");
+  const [testSending, setTestSending] = useState(false);
+  const [testConvId, setTestConvId] = useState<string | undefined>(undefined);
+  const testEndRef = useRef<HTMLDivElement>(null);
 
   // Sync DB config to local state
   useEffect(() => {
@@ -98,6 +112,10 @@ const TenantDetail = () => {
       setTenantDomain(tenant.domain || "");
     }
   }, [tenant]);
+
+  useEffect(() => {
+    testEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [testMessages]);
 
   const fetchModels = async () => {
     if (!provider.endpoint || !provider.apiKey) { toast.error("Nhập endpoint và API key"); return; }
@@ -185,6 +203,17 @@ const TenantDetail = () => {
     finally { setSaving(false); }
   };
 
+  const handleDeleteTenant = async () => {
+    if (!tenantId) return;
+    try {
+      await deleteTenantMut.mutateAsync(tenantId);
+      toast.success("Đã xóa tenant");
+      navigate("/tenants");
+    } catch (err: any) {
+      toast.error(err.message || "Xóa thất bại");
+    }
+  };
+
   const toggleTool = async (toolId: string, enabled: boolean) => {
     const { error } = await supabase.from("tool_definitions").update({ enabled }).eq("id", toolId);
     if (error) toast.error("Lỗi cập nhật tool");
@@ -193,6 +222,32 @@ const TenantDetail = () => {
   const deleteTool = async (toolId: string) => {
     const { error } = await supabase.from("tool_definitions").delete().eq("id", toolId);
     if (error) toast.error("Lỗi xóa tool");
+  };
+
+  // Test chat
+  const sendTestMessage = async () => {
+    if (!testInput.trim() || !tenantId) return;
+    const userMsg = testInput.trim();
+    setTestInput("");
+    setTestMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setTestSending(true);
+    try {
+      const result = await sendChatMessage({
+        tenantId,
+        message: userMsg,
+        conversationId: testConvId,
+        endUser: { name: "Admin Test" },
+      });
+      setTestConvId(result.conversation_id);
+      setTestMessages((prev) => [...prev, {
+        role: "bot",
+        content: result.response + (result.tool_used ? `\n\n🔧 Tool: ${result.tool_used} (${result.tool_latency_ms}ms)` : ""),
+      }]);
+    } catch (err: any) {
+      setTestMessages((prev) => [...prev, { role: "bot", content: `❌ Lỗi: ${err.message || "Unknown error"}` }]);
+    } finally {
+      setTestSending(false);
+    }
   };
 
   if (loadingTenant || loadingConfig) {
@@ -261,6 +316,9 @@ const TenantDetail = () => {
             </div>
           </div>
           <span className={tenant.status === "active" ? "badge-active" : "badge-pending"}>{tenant.status}</span>
+          <Button variant="outline" size="sm" className="text-destructive gap-1.5" onClick={() => setShowDeleteConfirm(true)}>
+            <Trash2 className="h-3.5 w-3.5" />Xóa
+          </Button>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -271,6 +329,7 @@ const TenantDetail = () => {
             <TabsTrigger value="knowledge" className="gap-2 text-xs"><FileText className="h-3.5 w-3.5" />Knowledge Base</TabsTrigger>
             <TabsTrigger value="widget" className="gap-2 text-xs"><Code2 className="h-3.5 w-3.5" />Widget & Embed</TabsTrigger>
             <TabsTrigger value="security" className="gap-2 text-xs"><Shield className="h-3.5 w-3.5" />Security</TabsTrigger>
+            <TabsTrigger value="test" className="gap-2 text-xs"><MessageSquare className="h-3.5 w-3.5" />Test Chat</TabsTrigger>
           </TabsList>
 
           {/* Overview */}
@@ -315,7 +374,6 @@ const TenantDetail = () => {
                 </Button>
               </div>
             </div>
-            {/* System Prompt */}
             <div className="rounded-lg border bg-card p-6 space-y-4">
               <h3 className="text-sm font-semibold">System Prompt</h3>
               <Textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={5} placeholder="Nhập system prompt cho AI bot..." />
@@ -581,8 +639,96 @@ const TenantDetail = () => {
               </div>
             </div>
           </TabsContent>
+
+          {/* Test Chat */}
+          <TabsContent value="test" className="space-y-6">
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <div className="flex items-center gap-3 border-b px-6 py-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10"><MessageSquare className="h-5 w-5 text-primary" /></div>
+                <div>
+                  <h3 className="text-sm font-semibold">Test Conversation — {tenant.name}</h3>
+                  <p className="text-xs text-muted-foreground">Gửi tin nhắn thử để test AI bot response</p>
+                </div>
+                {testConvId && (
+                  <span className="ml-auto text-[10px] text-muted-foreground font-mono">conv: {testConvId.slice(0, 8)}...</span>
+                )}
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => { setTestMessages([]); setTestConvId(undefined); }}>
+                  Reset
+                </Button>
+              </div>
+              <div className="h-80 overflow-y-auto p-6 space-y-4">
+                {testMessages.length === 0 && (
+                  <div className="text-center text-sm text-muted-foreground py-12">
+                    Gửi tin nhắn đầu tiên để bắt đầu test
+                  </div>
+                )}
+                {testMessages.map((msg, i) => (
+                  <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
+                    {msg.role !== "user" && (
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-1">
+                        <Bot className="h-4 w-4 text-primary" />
+                      </div>
+                    )}
+                    <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
+                      <p className="text-sm whitespace-pre-line">{msg.content}</p>
+                    </div>
+                    {msg.role === "user" && (
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary mt-1">
+                        <User className="h-4 w-4 text-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {testSending && (
+                  <div className="flex gap-3">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-1">
+                      <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                    </div>
+                    <div className="chat-bubble-bot">
+                      <p className="text-sm text-muted-foreground">Đang trả lời...</p>
+                    </div>
+                  </div>
+                )}
+                <div ref={testEndRef} />
+              </div>
+              <div className="border-t p-4">
+                <div className="flex items-center gap-3">
+                  <Input
+                    value={testInput}
+                    onChange={(e) => setTestInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendTestMessage()}
+                    placeholder="Nhập tin nhắn test..."
+                    className="flex-1 h-10"
+                    disabled={testSending}
+                  />
+                  <Button size="icon" className="shrink-0 h-9 w-9 glow-primary" onClick={sendTestMessage} disabled={testSending || !testInput.trim()}>
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
+
+      {/* Delete Tenant Confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xác nhận xóa tenant "{tenant.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Hành động này không thể hoàn tác. Tất cả conversations, KB documents, configs sẽ bị xóa.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTenant} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleteTenantMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+              Xóa tenant
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 };

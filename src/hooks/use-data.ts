@@ -57,6 +57,37 @@ export function useCreateTenant() {
   });
 }
 
+export function useUpdateTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: Partial<Tenant> }) => {
+      const { data, error } = await supabase
+        .from("tenants")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["tenants"] });
+      qc.invalidateQueries({ queryKey: ["tenants", vars.id] });
+    },
+  });
+}
+
+export function useDeleteTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("tenants").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tenants"] }),
+  });
+}
+
 // ==================== TENANT CONFIGS ====================
 export function useTenantConfig(tenantId: string) {
   return useQuery({
@@ -143,6 +174,20 @@ export function useKbDocuments(tenantId: string) {
   });
 }
 
+export function useDeleteKbDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ docId, tenantId }: { docId: string; tenantId: string }) => {
+      // Delete chunks first, then document
+      await supabase.from("kb_chunks").delete().eq("document_id", docId);
+      const { error } = await supabase.from("kb_documents").delete().eq("id", docId);
+      if (error) throw error;
+      return tenantId;
+    },
+    onSuccess: (tenantId) => qc.invalidateQueries({ queryKey: ["kb_documents", tenantId] }),
+  });
+}
+
 // ==================== TOOL DEFINITIONS ====================
 export function useToolDefinitions(tenantId: string) {
   return useQuery({
@@ -202,6 +247,65 @@ export function useHandoffEvents(tenantId?: string) {
         .limit(20);
       if (tenantId) query = query.eq("tenant_id", tenantId);
       const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// ==================== USER ROLES ====================
+export function useUserRoles(tenantId?: string) {
+  return useQuery({
+    queryKey: ["user_roles", tenantId],
+    queryFn: async () => {
+      let query = supabase
+        .from("user_roles")
+        .select("*, profiles(display_name, user_id)")
+        .order("created_at", { ascending: false });
+      if (tenantId) query = query.eq("tenant_id", tenantId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useCreateUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (role: { user_id: string; role: string; tenant_id: string | null }) => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .insert(role as any)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["user_roles"] }),
+  });
+}
+
+export function useDeleteUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("user_roles").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["user_roles"] }),
+  });
+}
+
+// ==================== PROFILES ====================
+export function useProfiles() {
+  return useQuery({
+    queryKey: ["profiles"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },

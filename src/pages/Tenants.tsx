@@ -4,25 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Building2,
-  Plus,
-  Search,
-  FileText,
-  MessageSquare,
-  ChevronRight,
-  ExternalLink,
-  Code2,
-  Loader2,
+  Plus, Search, ChevronRight, ExternalLink, Loader2, Pencil, Trash2,
 } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
-import { useTenants, useCreateTenant } from "@/hooks/use-data";
+import { useTenants, useCreateTenant, useUpdateTenant, useDeleteTenant } from "@/hooks/use-data";
 import { toast } from "sonner";
 
 const statusConfig: Record<string, { label: string; class: string }> = {
@@ -35,9 +30,16 @@ const Tenants = () => {
   const navigate = useNavigate();
   const { data: tenants, isLoading } = useTenants();
   const createTenant = useCreateTenant();
+  const updateTenant = useUpdateTenant();
+  const deleteTenant = useDeleteTenant();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newTenant, setNewTenant] = useState({ name: "", slug: "", domain: "" });
+
+  // Edit state
+  const [editTenant, setEditTenant] = useState<{ id: string; name: string; domain: string; status: string } | null>(null);
+  // Delete state
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const filtered = (tenants || []).filter(
     (t) =>
@@ -61,6 +63,35 @@ const Tenants = () => {
       setNewTenant({ name: "", slug: "", domain: "" });
     } catch (err: any) {
       toast.error(err.message || "Tạo tenant thất bại");
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editTenant) return;
+    try {
+      await updateTenant.mutateAsync({
+        id: editTenant.id,
+        updates: {
+          name: editTenant.name.trim(),
+          domain: editTenant.domain.trim() || null,
+          status: editTenant.status,
+        },
+      });
+      toast.success("Cập nhật thành công!");
+      setEditTenant(null);
+    } catch (err: any) {
+      toast.error(err.message || "Cập nhật thất bại");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await deleteTenant.mutateAsync(deleteId);
+      toast.success("Đã xóa tenant");
+      setDeleteId(null);
+    } catch (err: any) {
+      toast.error(err.message || "Xóa thất bại");
     }
   };
 
@@ -166,6 +197,18 @@ const Tenants = () => {
                     <span className={statusConfig[tenant.status]?.class || "badge-active"}>
                       {statusConfig[tenant.status]?.label || tenant.status}
                     </span>
+                    <Button
+                      variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); setEditTenant({ id: tenant.id, name: tenant.name, domain: tenant.domain || "", status: tenant.status }); }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                      onClick={(e) => { e.stopPropagation(); setDeleteId(tenant.id); }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
@@ -181,6 +224,64 @@ const Tenants = () => {
           </div>
         )}
       </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editTenant} onOpenChange={(open) => !open && setEditTenant(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Chỉnh sửa Tenant</DialogTitle>
+          </DialogHeader>
+          {editTenant && (
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Tên</Label>
+                <Input value={editTenant.name} onChange={(e) => setEditTenant({ ...editTenant, name: e.target.value })} maxLength={100} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Domain</Label>
+                <Input value={editTenant.domain} onChange={(e) => setEditTenant({ ...editTenant, domain: e.target.value })} maxLength={255} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Trạng thái</Label>
+                <Select value={editTenant.status} onValueChange={(v) => setEditTenant({ ...editTenant, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="trial">Trial</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setEditTenant(null)}>Hủy</Button>
+                <Button size="sm" className="glow-primary" onClick={handleUpdate} disabled={updateTenant.isPending}>
+                  {updateTenant.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                  Lưu
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xác nhận xóa tenant?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Hành động này không thể hoàn tác. Tất cả dữ liệu liên quan (conversations, KB, configs) sẽ bị xóa.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleteTenant.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+              Xóa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 };
