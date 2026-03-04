@@ -18,7 +18,7 @@ export async function extractFileContent(fileUrls: string[], tenantId: string) {
   });
   if (error) throw error;
   return data as {
-    results: Array<{ url: string; type: string; content?: string; error?: string }>;
+    results: Array<{ url: string; type: string; content?: string; strategy?: string; kb_document_id?: string; error?: string }>;
   };
 }
 
