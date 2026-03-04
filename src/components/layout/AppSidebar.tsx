@@ -56,11 +56,6 @@ export const AppSidebar = () => {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
-              {item.badge && (
-                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                  {item.badge}
-                </span>
-              )}
             </NavLink>
           );
         })}
