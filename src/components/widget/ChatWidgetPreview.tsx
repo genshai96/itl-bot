@@ -100,6 +100,7 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
               url: r.url,
               type: r.type,
               content: r.content,
+              strategy: r.strategy,
             }));
           } catch (err) {
             console.error("Extraction failed:", err);
