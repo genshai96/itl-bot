@@ -3,20 +3,16 @@ import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Building2,
   Plus,
   Search,
-  Settings,
   FileText,
   MessageSquare,
-  Trash2,
+  ChevronRight,
   ExternalLink,
   Code2,
-  Copy,
-  Eye,
-  ChevronRight,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -26,25 +22,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
-
-interface Tenant {
-  id: string;
-  name: string;
-  slug: string;
-  status: "active" | "inactive" | "trial";
-  kbCount: number;
-  convCount: number;
-  model: string;
-  createdAt: string;
-  domain?: string;
-}
-
-const mockTenants: Tenant[] = [
-  { id: "t-001", name: "Acme Corp", slug: "acme-corp", status: "active", kbCount: 4, convCount: 1284, model: "gpt-4o", createdAt: "2026-01-15", domain: "acme.com" },
-  { id: "t-002", name: "TechViet JSC", slug: "techviet", status: "active", kbCount: 2, convCount: 567, model: "gpt-4o-mini", createdAt: "2026-02-01", domain: "techviet.vn" },
-  { id: "t-003", name: "SoftPlus", slug: "softplus", status: "trial", kbCount: 1, convCount: 43, model: "gpt-3.5-turbo", createdAt: "2026-03-01" },
-  { id: "t-004", name: "DataHub", slug: "datahub", status: "inactive", kbCount: 0, convCount: 0, model: "", createdAt: "2026-02-20" },
-];
+import { useTenants, useCreateTenant } from "@/hooks/use-data";
+import { toast } from "sonner";
 
 const statusConfig: Record<string, { label: string; class: string }> = {
   active: { label: "Active", class: "badge-active" },
@@ -54,21 +33,40 @@ const statusConfig: Record<string, { label: string; class: string }> = {
 
 const Tenants = () => {
   const navigate = useNavigate();
-  const [tenants] = useState<Tenant[]>(mockTenants);
+  const { data: tenants, isLoading } = useTenants();
+  const createTenant = useCreateTenant();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newTenant, setNewTenant] = useState({ name: "", slug: "", domain: "" });
 
-  const filtered = tenants.filter(
+  const filtered = (tenants || []).filter(
     (t) =>
       t.name.toLowerCase().includes(search.toLowerCase()) ||
       t.slug.toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleCreate = async () => {
+    if (!newTenant.name.trim() || !newTenant.slug.trim()) {
+      toast.error("Tên và slug không được để trống");
+      return;
+    }
+    try {
+      await createTenant.mutateAsync({
+        name: newTenant.name.trim(),
+        slug: newTenant.slug.trim(),
+        domain: newTenant.domain.trim() || null,
+      });
+      toast.success("Tạo tenant thành công!");
+      setShowCreate(false);
+      setNewTenant({ name: "", slug: "", domain: "" });
+    } catch (err: any) {
+      toast.error(err.message || "Tạo tenant thất bại");
+    }
+  };
+
   return (
     <AdminLayout>
       <div className="space-y-8 animate-slide-in">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
@@ -98,6 +96,7 @@ const Tenants = () => {
                       setNewTenant({ ...newTenant, name, slug });
                     }}
                     placeholder="VD: Acme Corp"
+                    maxLength={100}
                   />
                 </div>
                 <div className="space-y-2">
@@ -107,6 +106,7 @@ const Tenants = () => {
                     onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
                     placeholder="acme-corp"
                     className="font-mono text-sm"
+                    maxLength={50}
                   />
                   <p className="text-[11px] text-muted-foreground">Dùng trong URL và embed code</p>
                 </div>
@@ -116,13 +116,13 @@ const Tenants = () => {
                     value={newTenant.domain}
                     onChange={(e) => setNewTenant({ ...newTenant, domain: e.target.value })}
                     placeholder="example.com"
+                    maxLength={255}
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>
-                    Hủy
-                  </Button>
-                  <Button size="sm" className="glow-primary" onClick={() => setShowCreate(false)}>
+                  <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>Hủy</Button>
+                  <Button size="sm" className="glow-primary" onClick={handleCreate} disabled={createTenant.isPending}>
+                    {createTenant.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
                     Tạo tenant
                   </Button>
                 </div>
@@ -131,67 +131,55 @@ const Tenants = () => {
           </Dialog>
         </div>
 
-        {/* Search */}
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Tìm tenant..."
-            className="pl-9 h-10"
-          />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm tenant..." className="pl-9 h-10" />
         </div>
 
-        {/* Tenant cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filtered.map((tenant) => (
-            <div
-              key={tenant.id}
-              className="stat-card group cursor-pointer"
-              onClick={() => navigate(`/tenants/${tenant.id}`)}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                    {tenant.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12 text-sm text-muted-foreground">
+            {search ? "Không tìm thấy tenant" : "Chưa có tenant nào. Tạo tenant đầu tiên!"}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filtered.map((tenant) => (
+              <div
+                key={tenant.id}
+                className="stat-card group cursor-pointer"
+                onClick={() => navigate(`/tenants/${tenant.id}`)}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                      {tenant.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold">{tenant.name}</h3>
+                      <p className="text-[11px] text-muted-foreground font-mono">{tenant.slug}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-semibold">{tenant.name}</h3>
-                    <p className="text-[11px] text-muted-foreground font-mono">{tenant.slug}</p>
+                  <div className="flex items-center gap-2">
+                    <span className={statusConfig[tenant.status]?.class || "badge-active"}>
+                      {statusConfig[tenant.status]?.label || tenant.status}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={statusConfig[tenant.status]?.class}>
-                    {statusConfig[tenant.status]?.label}
-                  </span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5" />
-                  <span>{tenant.kbCount} KB docs</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  <span>{tenant.convCount} chats</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Code2 className="h-3.5 w-3.5" />
-                  <span className="font-mono truncate">{tenant.model || "—"}</span>
-                </div>
+                {tenant.domain && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <ExternalLink className="h-3 w-3" />
+                    {tenant.domain}
+                  </div>
+                )}
               </div>
-
-              {tenant.domain && (
-                <div className="mt-3 pt-3 border-t flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <ExternalLink className="h-3 w-3" />
-                  {tenant.domain}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </AdminLayout>
   );
