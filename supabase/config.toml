@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.widget-config]
 verify_jwt = false
+
+[functions.fetch-models]
+verify_jwt = false

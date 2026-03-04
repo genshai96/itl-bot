@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 
-// Chat API — used by embedded widget
+// ==================== CHAT ====================
 export async function sendChatMessage({
   tenantId,
   message,
@@ -20,7 +20,6 @@ export async function sendChatMessage({
       end_user: endUser,
     },
   });
-
   if (error) throw error;
   return data as {
     conversation_id: string;
@@ -30,21 +29,20 @@ export async function sendChatMessage({
   };
 }
 
-// Widget config API
-export async function getWidgetConfig(slug: string) {
-  const { data, error } = await supabase.functions.invoke("widget-config", {
-    body: {},
-    headers: {},
+// ==================== MODELS ====================
+
+export interface ModelInfo {
+  id: string;
+  name?: string;
+  owned_by?: string;
+}
+
+export async function fetchProviderModels(endpoint: string, apiKey: string): Promise<ModelInfo[]> {
+  const { data, error } = await supabase.functions.invoke("fetch-models", {
+    body: { endpoint, api_key: apiKey },
   });
-  
-  // Use fetch directly since we need query params
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/widget-config?slug=${encodeURIComponent(slug)}`;
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-  });
-  
-  if (!resp.ok) throw new Error("Failed to get widget config");
-  return resp.json();
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return (data?.models || []) as ModelInfo[];
 }

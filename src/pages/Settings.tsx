@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { toast } from "sonner";
+import { fetchProviderModels, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -27,9 +29,10 @@ const Settings = () => {
     temperature: "0.3",
     maxTokens: "2048",
   });
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
+  const [searchModel, setSearchModel] = useState("");
 
   const [tools, setTools] = useState([
     { id: "check_receivable_by_month", name: "Tra công nợ theo tháng", enabled: true, endpoint: "/v1/tools/receivable/by-month" },
@@ -37,19 +40,29 @@ const Settings = () => {
     { id: "check_contract_status", name: "Trạng thái hợp đồng", enabled: false, endpoint: "/v1/tools/contracts/status" },
   ]);
 
-  const fetchModels = async () => {
+  const fetchModelsHandler = async () => {
+    if (!providerConfig.endpoint || !providerConfig.apiKey) {
+      toast.error("Vui lòng nhập endpoint và API key trước");
+      return;
+    }
     setLoadingModels(true);
-    // Simulate fetching models
-    setTimeout(() => {
-      setModels(["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "gpt-4-turbo"]);
+    setConnectionStatus("idle");
+    try {
+      const result = await fetchProviderModels(providerConfig.endpoint, providerConfig.apiKey);
+      setModels(result);
       setConnectionStatus("success");
+      toast.success(`Tìm thấy ${result.length} models`);
+    } catch (err) {
+      console.error(err);
+      setConnectionStatus("error");
+      toast.error(err instanceof Error ? err.message : "Không thể kết nối tới provider");
+    } finally {
       setLoadingModels(false);
-    }, 1500);
+    }
   };
 
   const testConnection = () => {
-    setConnectionStatus("idle");
-    fetchModels();
+    fetchModelsHandler();
   };
 
   return (
@@ -126,27 +139,38 @@ const Settings = () => {
                     <TestTube className="h-3.5 w-3.5" />
                     Test Connection
                   </Button>
-                  <Button onClick={fetchModels} variant="outline" size="sm" className="gap-2 text-xs" disabled={loadingModels}>
+                  <Button onClick={fetchModelsHandler} variant="outline" size="sm" className="gap-2 text-xs" disabled={loadingModels}>
                     <RefreshCw className={`h-3.5 w-3.5 ${loadingModels ? "animate-spin" : ""}`} />
                     Fetch Models
                   </Button>
                 </div>
 
                 {models.length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Model</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {models.map((model) => (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">Model ({models.length} available)</Label>
+                      <Input
+                        value={searchModel}
+                        onChange={(e) => setSearchModel(e.target.value)}
+                        placeholder="Tìm model..."
+                        className="h-8 w-48 text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                      {models
+                        .filter((m) => m.id.toLowerCase().includes(searchModel.toLowerCase()))
+                        .map((model) => (
                         <button
-                          key={model}
-                          onClick={() => setProviderConfig({ ...providerConfig, model })}
-                          className={`rounded-lg border px-4 py-2.5 text-left text-sm font-mono transition-all ${
-                            providerConfig.model === model
+                          key={model.id}
+                          onClick={() => setProviderConfig({ ...providerConfig, model: model.id })}
+                          className={`rounded-lg border px-3 py-2 text-left transition-all ${
+                            providerConfig.model === model.id
                               ? "border-primary bg-primary/5 text-primary"
                               : "hover:border-primary/30 hover:bg-muted/50"
                           }`}
                         >
-                          {model}
+                          <p className="text-xs font-mono truncate">{model.id}</p>
+                          {model.owned_by && <p className="text-[10px] text-muted-foreground mt-0.5">{model.owned_by}</p>}
                         </button>
                       ))}
                     </div>

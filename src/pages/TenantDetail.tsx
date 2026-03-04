@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { fetchProviderModels, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,7 +58,7 @@ const TenantDetail = () => {
     maxTokens: "2048",
   });
 
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [connectionOk, setConnectionOk] = useState(false);
 
@@ -90,13 +92,26 @@ const TenantDetail = () => {
     { id: 3, name: "Quy trình báo lỗi kỹ thuật", chunks: 25, status: "processing", updatedAt: "2026-03-04" },
   ];
 
-  const fetchModels = () => {
+  const [searchModel, setSearchModel] = useState("");
+
+  const fetchModels = async () => {
+    if (!provider.endpoint || !provider.apiKey) {
+      toast.error("Vui lòng nhập endpoint và API key trước");
+      return;
+    }
     setLoadingModels(true);
-    setTimeout(() => {
-      setModels(["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "claude-3.5-sonnet", "gemini-2.5-flash"]);
+    setConnectionOk(false);
+    try {
+      const result = await fetchProviderModels(provider.endpoint, provider.apiKey);
+      setModels(result);
       setConnectionOk(true);
+      toast.success(`Tìm thấy ${result.length} models`);
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : "Không thể kết nối tới provider");
+    } finally {
       setLoadingModels(false);
-    }, 1200);
+    }
   };
 
   const embedCode = `<!-- AI Support Widget - ${tenant.name} -->
@@ -232,13 +247,24 @@ const TenantDetail = () => {
                   </Button>
                 </div>
                 {models.length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Model</Label>
-                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                      {models.map((model) => (
-                        <button key={model} onClick={() => setProvider({ ...provider, model })}
-                          className={`rounded-lg border px-4 py-2.5 text-left text-sm font-mono transition-all ${provider.model === model ? "border-primary bg-primary/5 text-primary" : "hover:border-primary/30 hover:bg-muted/50"}`}>
-                          {model}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">Model ({models.length} available)</Label>
+                      <Input
+                        value={searchModel}
+                        onChange={(e) => setSearchModel(e.target.value)}
+                        placeholder="Tìm model..."
+                        className="h-8 w-48 text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                      {models
+                        .filter((m) => m.id.toLowerCase().includes(searchModel.toLowerCase()) || (m.name || "").toLowerCase().includes(searchModel.toLowerCase()))
+                        .map((model) => (
+                        <button key={model.id} onClick={() => setProvider({ ...provider, model: model.id })}
+                          className={`rounded-lg border px-3 py-2 text-left transition-all ${provider.model === model.id ? "border-primary bg-primary/5 text-primary" : "hover:border-primary/30 hover:bg-muted/50"}`}>
+                          <p className="text-xs font-mono truncate">{model.id}</p>
+                          {model.owned_by && <p className="text-[10px] text-muted-foreground mt-0.5">{model.owned_by}</p>}
                         </button>
                       ))}
                     </div>
