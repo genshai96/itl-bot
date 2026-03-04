@@ -139,27 +139,38 @@ const Settings = () => {
                     <TestTube className="h-3.5 w-3.5" />
                     Test Connection
                   </Button>
-                  <Button onClick={fetchModels} variant="outline" size="sm" className="gap-2 text-xs" disabled={loadingModels}>
+                  <Button onClick={fetchModelsHandler} variant="outline" size="sm" className="gap-2 text-xs" disabled={loadingModels}>
                     <RefreshCw className={`h-3.5 w-3.5 ${loadingModels ? "animate-spin" : ""}`} />
                     Fetch Models
                   </Button>
                 </div>
 
                 {models.length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Model</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {models.map((model) => (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">Model ({models.length} available)</Label>
+                      <Input
+                        value={searchModel}
+                        onChange={(e) => setSearchModel(e.target.value)}
+                        placeholder="Tìm model..."
+                        className="h-8 w-48 text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                      {models
+                        .filter((m) => m.id.toLowerCase().includes(searchModel.toLowerCase()))
+                        .map((model) => (
                         <button
-                          key={model}
-                          onClick={() => setProviderConfig({ ...providerConfig, model })}
-                          className={`rounded-lg border px-4 py-2.5 text-left text-sm font-mono transition-all ${
-                            providerConfig.model === model
+                          key={model.id}
+                          onClick={() => setProviderConfig({ ...providerConfig, model: model.id })}
+                          className={`rounded-lg border px-3 py-2 text-left transition-all ${
+                            providerConfig.model === model.id
                               ? "border-primary bg-primary/5 text-primary"
                               : "hover:border-primary/30 hover:bg-muted/50"
                           }`}
                         >
-                          {model}
+                          <p className="text-xs font-mono truncate">{model.id}</p>
+                          {model.owned_by && <p className="text-[10px] text-muted-foreground mt-0.5">{model.owned_by}</p>}
                         </button>
                       ))}
                     </div>
