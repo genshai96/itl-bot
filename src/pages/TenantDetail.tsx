@@ -634,7 +634,7 @@ const TenantDetail = () => {
                       </div>
                     )}
                     <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
-                      <p className="text-sm whitespace-pre-line">{msg.content}</p>
+                      <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
                     </div>
                     {msg.role === "user" && (
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary mt-1">
