@@ -674,6 +674,9 @@ const TenantDetail = () => {
                       </div>
                     )}
                     <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
+                      {msg.imageUrls?.map((url, j) => (
+                        <img key={j} src={url} alt="" className="rounded-lg max-w-full max-h-32 mb-2 border" />
+                      ))}
                       <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
                     </div>
                     {msg.role === "user" && (
