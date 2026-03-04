@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { MessageSquare, X, Send, Minus, Loader2 } from "lucide-react";
-import { sendChatMessage } from "@/lib/api";
+import { sendChatMessage, uploadChatAttachment, extractFileContent } from "@/lib/api";
 import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 import { ChatFileUpload, type ChatAttachment } from "@/components/chat/ChatFileUpload";
+import { toast } from "sonner";
 
 interface WidgetConfig {
   tenantId: string;
@@ -35,7 +36,7 @@ interface ChatMessage {
   role: "user" | "bot";
   content: string;
   time: string;
-  attachments?: ChatAttachment[];
+  imageUrls?: string[];
 }
 
 const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }) => {
@@ -58,28 +59,65 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
     const msgText = input;
     const msgAttachments = [...attachments];
 
-    // Build message with attachment descriptions
-    let fullMessage = msgText;
-    if (msgAttachments.length > 0) {
-      const descs = msgAttachments.map((a) =>
-        a.type === "image" ? `[Hình ảnh: ${a.file.name}]` : `[Tệp: ${a.file.name}]`
-      );
-      fullMessage = [msgText, ...descs].filter(Boolean).join("\n");
-    }
+    // Show user message immediately with image previews
+    const imagePreviewUrls = msgAttachments
+      .filter((a) => a.type === "image" && a.preview)
+      .map((a) => a.preview!);
 
-    const userMsg: ChatMessage = { id: Date.now(), role: "user", content: msgText || "📎 Đính kèm", time: now(), attachments: msgAttachments };
+    const userMsg: ChatMessage = {
+      id: Date.now(),
+      role: "user",
+      content: msgText || `📎 ${msgAttachments.map((a) => a.file.name).join(", ")}`,
+      time: now(),
+      imageUrls: imagePreviewUrls,
+    };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setAttachments([]);
     setIsLoading(true);
 
     try {
+      // 1. Upload files to storage
+      let processedAttachments: Array<{ url: string; type: string; content?: string }> = [];
+
+      if (msgAttachments.length > 0) {
+        const uploadedUrls: string[] = [];
+        for (const att of msgAttachments) {
+          try {
+            const url = await uploadChatAttachment(att.file, config.tenantId);
+            uploadedUrls.push(url);
+          } catch (err) {
+            console.error("Upload failed:", err);
+            toast.error(`Upload thất bại: ${att.file.name}`);
+          }
+        }
+
+        // 2. Extract content from uploaded files
+        if (uploadedUrls.length > 0) {
+          try {
+            const extracted = await extractFileContent(uploadedUrls, config.tenantId);
+            processedAttachments = extracted.results.map((r) => ({
+              url: r.url,
+              type: r.type,
+              content: r.content,
+            }));
+          } catch (err) {
+            console.error("Extraction failed:", err);
+            // Still send with file URLs as fallback
+            processedAttachments = uploadedUrls.map((url) => ({ url, type: "unknown" }));
+          }
+        }
+      }
+
+      // 3. Send to chat with attachment context
       const result = await sendChatMessage({
         tenantId: config.tenantId,
-        message: fullMessage,
+        message: msgText,
         conversationId,
         endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone },
+        attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
       });
+
       if (result.conversation_id) setConversationId(result.conversation_id);
       setMessages((prev) => [...prev, {
         id: Date.now() + 1, role: "bot", content: result.response, time: now(),
@@ -157,15 +195,9 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                       }`}
                       style={msg.role === "user" ? { background: config.primaryColor } : undefined}
                     >
-                      {/* Attachment previews */}
-                      {msg.attachments?.map((att, i) => (
-                        <div key={i} className="mb-2">
-                          {att.type === "image" && att.preview ? (
-                            <img src={att.preview} alt="" className="rounded-lg max-w-full max-h-32 border border-white/20" />
-                          ) : (
-                            <div className="text-xs opacity-80">📎 {att.file.name}</div>
-                          )}
-                        </div>
+                      {/* Image previews for user messages */}
+                      {msg.imageUrls?.map((url, i) => (
+                        <img key={i} src={url} alt="" className="rounded-lg max-w-full max-h-32 border border-white/20 mb-2" />
                       ))}
                       <ChatMessageRenderer content={msg.content} role={msg.role} />
                       <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-white/60" : "text-muted-foreground"}`}>{msg.time}</p>
@@ -184,11 +216,31 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
 
               {/* Input */}
               <div className="border-t p-3">
+                {/* Attachment previews */}
+                {attachments.length > 0 && (
+                  <div className="flex gap-2 flex-wrap mb-2 px-1">
+                    {attachments.map((att, i) => (
+                      <div key={i} className="relative group">
+                        {att.type === "image" && att.preview ? (
+                          <img src={att.preview} alt="" className="h-12 w-12 rounded-lg object-cover border" />
+                        ) : (
+                          <div className="h-12 rounded-lg border bg-muted/50 flex items-center gap-1.5 px-2 text-[10px] text-muted-foreground max-w-[120px]">
+                            <span className="truncate">{att.file.name}</span>
+                          </div>
+                        )}
+                        <button onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
                   <ChatFileUpload
-                    attachments={attachments}
+                    attachments={[]} // previews handled above
                     onAdd={(a) => setAttachments((prev) => [...prev, a])}
-                    onRemove={(i) => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    onRemove={() => {}}
                     disabled={isLoading}
                   />
                   <input

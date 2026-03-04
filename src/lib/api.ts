@@ -1,16 +1,40 @@
 import { supabase } from "@/integrations/supabase/client";
 
+// ==================== FILE UPLOAD ====================
+export async function uploadChatAttachment(file: File, tenantId: string): Promise<string> {
+  const ext = file.name.split(".").pop() || "bin";
+  const path = `${tenantId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+  const { error } = await supabase.storage.from("chat-attachments").upload(path, file);
+  if (error) throw error;
+
+  const { data } = supabase.storage.from("chat-attachments").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function extractFileContent(fileUrls: string[], tenantId: string) {
+  const { data, error } = await supabase.functions.invoke("extract-file-content", {
+    body: { file_urls: fileUrls, tenant_id: tenantId },
+  });
+  if (error) throw error;
+  return data as {
+    results: Array<{ url: string; type: string; content?: string; error?: string }>;
+  };
+}
+
 // ==================== CHAT ====================
 export async function sendChatMessage({
   tenantId,
   message,
   conversationId,
   endUser,
+  attachments,
 }: {
   tenantId: string;
   message: string;
   conversationId?: string;
   endUser?: { name?: string; email?: string; phone?: string };
+  attachments?: Array<{ url: string; type: string; content?: string }>;
 }) {
   const { data, error } = await supabase.functions.invoke("chat", {
     body: {
@@ -18,6 +42,7 @@ export async function sendChatMessage({
       message,
       conversation_id: conversationId,
       end_user: endUser,
+      attachments,
     },
   });
   if (error) throw error;
