@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { MessageSquare, X, Send, Minus, User, Loader2 } from "lucide-react";
+import { MessageSquare, X, Send, Minus, Loader2 } from "lucide-react";
 import { sendChatMessage } from "@/lib/api";
+import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
+import { ChatFileUpload, type ChatAttachment } from "@/components/chat/ChatFileUpload";
 
 interface WidgetConfig {
   tenantId: string;
@@ -33,13 +35,9 @@ interface ChatMessage {
   role: "user" | "bot";
   content: string;
   time: string;
+  attachments?: ChatAttachment[];
 }
 
-/**
- * Standalone embeddable chat widget.
- * In production this would be loaded via <script> tag and rendered in an iframe/shadow DOM.
- * For demo purposes, render directly as a React component.
- */
 const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<"info" | "chat">("info");
@@ -50,46 +48,45 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>();
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
 
   const needsInfo = config.collectName || config.collectEmail || config.collectPhone;
-
-  const handleStartChat = () => {
-    setStep("chat");
-  };
+  const now = () => new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-    const now = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-    const userMsg: ChatMessage = { id: Date.now(), role: "user", content: input, time: now };
-    setMessages((prev) => [...prev, userMsg]);
+    if ((!input.trim() && attachments.length === 0) || isLoading) return;
     const msgText = input;
+    const msgAttachments = [...attachments];
+
+    // Build message with attachment descriptions
+    let fullMessage = msgText;
+    if (msgAttachments.length > 0) {
+      const descs = msgAttachments.map((a) =>
+        a.type === "image" ? `[Hình ảnh: ${a.file.name}]` : `[Tệp: ${a.file.name}]`
+      );
+      fullMessage = [msgText, ...descs].filter(Boolean).join("\n");
+    }
+
+    const userMsg: ChatMessage = { id: Date.now(), role: "user", content: msgText || "📎 Đính kèm", time: now(), attachments: msgAttachments };
+    setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachments([]);
     setIsLoading(true);
 
     try {
       const result = await sendChatMessage({
         tenantId: config.tenantId,
-        message: msgText,
+        message: fullMessage,
         conversationId,
         endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone },
       });
-
       if (result.conversation_id) setConversationId(result.conversation_id);
-
-      const botMsg: ChatMessage = {
-        id: Date.now() + 1,
-        role: "bot",
-        content: result.response,
-        time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-    } catch (err) {
-      console.error("Chat error:", err);
       setMessages((prev) => [...prev, {
-        id: Date.now() + 1,
-        role: "bot",
-        content: "Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại.",
-        time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
+        id: Date.now() + 1, role: "bot", content: result.response, time: now(),
+      }]);
+    } catch {
+      setMessages((prev) => [...prev, {
+        id: Date.now() + 1, role: "bot", content: "Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại.", time: now(),
       }]);
     } finally {
       setIsLoading(false);
@@ -98,9 +95,8 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
 
   return (
     <div className={`fixed bottom-6 z-50 ${config.position === "bottom-right" ? "right-6" : "left-6"}`}>
-      {/* Chat window */}
       {isOpen && (
-        <div className="mb-4 w-[360px] rounded-2xl bg-card border shadow-lg overflow-hidden animate-slide-in"
+        <div className="mb-4 w-[380px] rounded-2xl bg-card border shadow-lg overflow-hidden animate-slide-in"
           style={{ boxShadow: `0 12px 40px ${config.primaryColor}25` }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4" style={{ background: config.primaryColor }}>
@@ -118,49 +114,34 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
             </div>
           </div>
 
-          {/* Info collection step */}
+          {/* Info collection */}
           {step === "info" && needsInfo ? (
             <div className="p-5 space-y-4">
               <p className="text-sm text-muted-foreground">Vui lòng cung cấp thông tin để bắt đầu chat:</p>
               {config.collectName && (
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Họ tên</label>
-                  <input
-                    value={userInfo.name}
-                    onChange={(e) => setUserInfo({ ...userInfo, name: e.target.value })}
-                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    placeholder="Nguyễn Văn A"
-                  />
+                  <input value={userInfo.name} onChange={(e) => setUserInfo({ ...userInfo, name: e.target.value })}
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="Nguyễn Văn A" />
                 </div>
               )}
               {config.collectEmail && (
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Email</label>
-                  <input
-                    value={userInfo.email}
-                    onChange={(e) => setUserInfo({ ...userInfo, email: e.target.value })}
-                    type="email"
-                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    placeholder="email@company.com"
-                  />
+                  <input value={userInfo.email} onChange={(e) => setUserInfo({ ...userInfo, email: e.target.value })}
+                    type="email" className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="email@company.com" />
                 </div>
               )}
               {config.collectPhone && (
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Số điện thoại</label>
-                  <input
-                    value={userInfo.phone}
-                    onChange={(e) => setUserInfo({ ...userInfo, phone: e.target.value })}
-                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    placeholder="0912 345 678"
-                  />
+                  <input value={userInfo.phone} onChange={(e) => setUserInfo({ ...userInfo, phone: e.target.value })}
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="0912 345 678" />
                 </div>
               )}
-              <button
-                onClick={handleStartChat}
+              <button onClick={() => setStep("chat")}
                 className="w-full rounded-lg py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
-                style={{ background: config.primaryColor }}
-              >
+                style={{ background: config.primaryColor }}>
                 Bắt đầu chat
               </button>
             </div>
@@ -171,14 +152,22 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                 {messages.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
-                        msg.role === "user"
-                          ? "rounded-br-md text-white"
-                          : "chat-bubble-bot"
+                      className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
+                        msg.role === "user" ? "rounded-br-md text-white" : "chat-bubble-bot"
                       }`}
                       style={msg.role === "user" ? { background: config.primaryColor } : undefined}
                     >
-                      {msg.content}
+                      {/* Attachment previews */}
+                      {msg.attachments?.map((att, i) => (
+                        <div key={i} className="mb-2">
+                          {att.type === "image" && att.preview ? (
+                            <img src={att.preview} alt="" className="rounded-lg max-w-full max-h-32 border border-white/20" />
+                          ) : (
+                            <div className="text-xs opacity-80">📎 {att.file.name}</div>
+                          )}
+                        </div>
+                      ))}
+                      <ChatMessageRenderer content={msg.content} role={msg.role} />
                       <p className={`text-[10px] mt-1 ${msg.role === "user" ? "text-white/60" : "text-muted-foreground"}`}>{msg.time}</p>
                     </div>
                   </div>
@@ -195,7 +184,13 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
 
               {/* Input */}
               <div className="border-t p-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-end gap-2">
+                  <ChatFileUpload
+                    attachments={attachments}
+                    onAdd={(a) => setAttachments((prev) => [...prev, a])}
+                    onRemove={(i) => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    disabled={isLoading}
+                  />
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -204,12 +199,9 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                     disabled={isLoading}
                     className="flex-1 rounded-full border px-4 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                   />
-                  <button
-                    onClick={handleSend}
-                    disabled={isLoading}
-                    className="h-10 w-10 rounded-full flex items-center justify-center text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                    style={{ background: config.primaryColor }}
-                  >
+                  <button onClick={handleSend} disabled={isLoading}
+                    className="h-10 w-10 rounded-full flex items-center justify-center text-white transition-opacity hover:opacity-90 disabled:opacity-50 shrink-0"
+                    style={{ background: config.primaryColor }}>
                     {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
@@ -221,13 +213,9 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
 
       {/* FAB */}
       <button
-        onClick={() => {
-          setIsOpen(!isOpen);
-          if (!needsInfo) setStep("chat");
-        }}
+        onClick={() => { setIsOpen(!isOpen); if (!needsInfo) setStep("chat"); }}
         className="h-14 w-14 rounded-full flex items-center justify-center text-white shadow-lg transition-transform hover:scale-105"
-        style={{ background: config.primaryColor, boxShadow: `0 4px 20px ${config.primaryColor}40` }}
-      >
+        style={{ background: config.primaryColor, boxShadow: `0 4px 20px ${config.primaryColor}40` }}>
         {isOpen ? <X className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
       </button>
     </div>
