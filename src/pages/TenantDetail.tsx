@@ -450,36 +450,7 @@ const TenantDetail = () => {
 
           {/* Tools */}
           <TabsContent value="tools" className="space-y-6">
-            <div className="rounded-lg border bg-card p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10"><Sliders className="h-5 w-5 text-primary" /></div>
-                  <div>
-                    <h3 className="text-sm font-semibold">Tool Allowlist — {tenant.name}</h3>
-                    <p className="text-xs text-muted-foreground">Bot chỉ được gọi tool trong danh sách này</p>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {(!toolDefs || toolDefs.length === 0) && (
-                  <p className="text-sm text-muted-foreground text-center py-6">Chưa có tool nào</p>
-                )}
-                {toolDefs?.map((tool) => (
-                  <div key={tool.id} className="flex items-center justify-between rounded-lg border px-4 py-3.5 hover:bg-muted/30 transition-colors">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{tool.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono">{tool.endpoint}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Switch checked={tool.enabled ?? true} onCheckedChange={(checked) => toggleTool(tool.id, checked)} />
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => deleteTool(tool.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ToolManager tenantId={tenantId!} tenantName={tenant.name} />
           </TabsContent>
 
           {/* Knowledge Base */}
