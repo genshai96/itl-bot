@@ -699,7 +699,33 @@ const TenantDetail = () => {
                 <div ref={testEndRef} />
               </div>
               <div className="border-t p-4">
+                {testAttachments.length > 0 && (
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {testAttachments.map((att, i) => (
+                      <div key={i} className="relative group">
+                        {att.type === "image" && att.preview ? (
+                          <img src={att.preview} alt="" className="h-12 w-12 rounded-lg object-cover border" />
+                        ) : (
+                          <div className="h-12 rounded-lg border bg-muted/50 flex items-center gap-1.5 px-2 text-[10px] text-muted-foreground max-w-[120px]">
+                            <FileText className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{att.file.name}</span>
+                          </div>
+                        )}
+                        <button onClick={() => setTestAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
+                  <ChatFileUpload
+                    attachments={[]}
+                    onAdd={(a) => setTestAttachments((prev) => [...prev, a])}
+                    onRemove={() => {}}
+                    disabled={testSending}
+                  />
                   <Input
                     value={testInput}
                     onChange={(e) => setTestInput(e.target.value)}
@@ -708,7 +734,7 @@ const TenantDetail = () => {
                     className="flex-1 h-10"
                     disabled={testSending}
                   />
-                  <Button size="icon" className="shrink-0 h-9 w-9 glow-primary" onClick={sendTestMessage} disabled={testSending || !testInput.trim()}>
+                  <Button size="icon" className="shrink-0 h-9 w-9 glow-primary" onClick={sendTestMessage} disabled={testSending || (!testInput.trim() && testAttachments.length === 0)}>
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
