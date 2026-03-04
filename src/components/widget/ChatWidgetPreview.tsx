@@ -48,6 +48,8 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
     { id: 1, role: "bot", content: config.welcomeMessage, time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) },
   ]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | undefined>();
 
   const needsInfo = config.collectName || config.collectEmail || config.collectPhone;
 
@@ -55,23 +57,43 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
     setStep("chat");
   };
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
     const now = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
     const userMsg: ChatMessage = { id: Date.now(), role: "user", content: input, time: now };
     setMessages((prev) => [...prev, userMsg]);
+    const msgText = input;
     setInput("");
+    setIsLoading(true);
 
-    // Simulate bot response
-    setTimeout(() => {
+    try {
+      const result = await sendChatMessage({
+        tenantId: config.tenantId,
+        message: msgText,
+        conversationId,
+        endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone },
+      });
+
+      if (result.conversation_id) setConversationId(result.conversation_id);
+
       const botMsg: ChatMessage = {
         id: Date.now() + 1,
         role: "bot",
-        content: "Cảm ơn bạn! Tôi đang xử lý yêu cầu của bạn. Vui lòng đợi trong giây lát...",
+        content: result.response,
         time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, botMsg]);
-    }, 1000);
+    } catch (err) {
+      console.error("Chat error:", err);
+      setMessages((prev) => [...prev, {
+        id: Date.now() + 1,
+        role: "bot",
+        content: "Xin lỗi, đã có lỗi xảy ra. Vui lòng thử lại.",
+        time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
