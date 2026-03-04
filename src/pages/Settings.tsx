@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { toast } from "sonner";
+import { fetchProviderModels, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -27,9 +29,10 @@ const Settings = () => {
     temperature: "0.3",
     maxTokens: "2048",
   });
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
+  const [searchModel, setSearchModel] = useState("");
 
   const [tools, setTools] = useState([
     { id: "check_receivable_by_month", name: "Tra công nợ theo tháng", enabled: true, endpoint: "/v1/tools/receivable/by-month" },
@@ -37,19 +40,29 @@ const Settings = () => {
     { id: "check_contract_status", name: "Trạng thái hợp đồng", enabled: false, endpoint: "/v1/tools/contracts/status" },
   ]);
 
-  const fetchModels = async () => {
+  const fetchModelsHandler = async () => {
+    if (!providerConfig.endpoint || !providerConfig.apiKey) {
+      toast.error("Vui lòng nhập endpoint và API key trước");
+      return;
+    }
     setLoadingModels(true);
-    // Simulate fetching models
-    setTimeout(() => {
-      setModels(["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "gpt-4-turbo"]);
+    setConnectionStatus("idle");
+    try {
+      const result = await fetchProviderModels(providerConfig.endpoint, providerConfig.apiKey);
+      setModels(result);
       setConnectionStatus("success");
+      toast.success(`Tìm thấy ${result.length} models`);
+    } catch (err) {
+      console.error(err);
+      setConnectionStatus("error");
+      toast.error(err instanceof Error ? err.message : "Không thể kết nối tới provider");
+    } finally {
       setLoadingModels(false);
-    }, 1500);
+    }
   };
 
   const testConnection = () => {
-    setConnectionStatus("idle");
-    fetchModels();
+    fetchModelsHandler();
   };
 
   return (
