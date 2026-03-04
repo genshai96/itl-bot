@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { fetchProviderModels, sendChatMessage, type ModelInfo } from "@/lib/api";
+import { fetchProviderModels, sendChatMessage, uploadChatAttachment, extractFileContent, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
