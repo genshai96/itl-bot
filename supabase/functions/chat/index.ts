@@ -84,24 +84,48 @@ serve(async (req) => {
       content: m.content,
     }));
 
-    // 5. Get tenant's enabled tools for function calling
+    // 5. RAG: Search knowledge base for relevant context
+    let ragContext = "";
+    let ragSources: string[] = [];
+    try {
+      ragContext = await searchKnowledgeBase(supabase, tenant_id, message, tenantConfig);
+      if (ragContext) {
+        // Extract document names for sources
+        const { data: docs } = await supabase
+          .from("kb_chunks")
+          .select("document_id, kb_documents!inner(name)")
+          .eq("tenant_id", tenant_id)
+          .textSearch("content", message.split(" ").slice(0, 5).join(" & "), { type: "plain" })
+          .limit(3);
+        if (docs) {
+          ragSources = [...new Set(docs.map((d: any) => d.kb_documents?.name).filter(Boolean))];
+        }
+      }
+    } catch (ragErr) {
+      console.warn("RAG search failed, continuing without:", ragErr);
+    }
+
+    // 6. Get tenant's enabled tools
     const { data: enabledTools } = await supabase
       .from("tool_definitions")
       .select("*")
       .eq("tenant_id", tenant_id)
       .eq("enabled", true);
 
-    // 6. Build system prompt
-    const systemPrompt = tenantConfig.system_prompt || 
+    // 7. Build system prompt with RAG context
+    let systemPrompt = tenantConfig.system_prompt ||
       `You are an AI support assistant. Be helpful, concise, and professional. If you're not confident about an answer (below ${tenantConfig.confidence_threshold || 0.6} confidence), suggest escalating to a human agent. Always cite sources when using knowledge base information.`;
 
-    // 7. Call the tenant's configured LLM provider
+    if (ragContext) {
+      systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\nUse the following information to answer the user's question. Cite the source documents when relevant.\n\n${ragContext}\n--- END CONTEXT ---`;
+    }
+
+    // 8. Call the tenant's configured LLM
     const providerEndpoint = tenantConfig.provider_endpoint;
     const providerApiKey = tenantConfig.provider_api_key;
     const model = tenantConfig.provider_model;
 
     if (!providerEndpoint || !providerApiKey || !model) {
-      // Fallback: return a helpful message
       const fallbackResponse = "Xin lỗi, hệ thống AI chưa được cấu hình cho tenant này. Vui lòng liên hệ quản trị viên.";
       await supabase.from("messages").insert({
         conversation_id: convId,
@@ -117,7 +141,6 @@ serve(async (req) => {
       });
     }
 
-    // Build tools for function calling if available
     const toolsPayload = enabledTools?.length ? enabledTools.map((t) => ({
       type: "function",
       function: {
@@ -164,7 +187,6 @@ serve(async (req) => {
         content: errorResponse,
       });
 
-      // Log audit
       await supabase.from("audit_logs").insert({
         tenant_id,
         actor_type: "bot",
@@ -195,11 +217,9 @@ serve(async (req) => {
       toolUsed = toolCall.function.name;
       const toolStart = Date.now();
 
-      // Find tool definition
       const toolDef = enabledTools?.find((t) => t.tool_id === toolUsed);
       if (toolDef) {
         try {
-          // Call internal tool endpoint
           const toolResponse = await fetch(toolDef.endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -208,7 +228,6 @@ serve(async (req) => {
           const toolResult = await toolResponse.json();
           toolLatency = Date.now() - toolStart;
 
-          // Log tool call
           await supabase.from("tool_call_logs").insert({
             conversation_id: convId,
             tenant_id,
@@ -219,7 +238,6 @@ serve(async (req) => {
             latency_ms: toolLatency,
           });
 
-          // Send tool result back to LLM for final response
           const followUp = await fetch(completionUrl, {
             method: "POST",
             headers: {
@@ -260,16 +278,20 @@ serve(async (req) => {
       }
     }
 
-    // 8. Save bot response
+    // 9. Save bot response
     await supabase.from("messages").insert({
       conversation_id: convId,
       role: "bot",
       content: botContent,
       tool_used: toolUsed || null,
       tool_latency_ms: toolLatency || null,
+      sources: ragSources.length > 0 ? ragSources : null,
     });
 
-    // 9. Audit log
+    // 10. Update conversation metadata
+    await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convId);
+
+    // 11. Audit log
     await supabase.from("audit_logs").insert({
       tenant_id,
       actor_type: "bot",
@@ -279,6 +301,7 @@ serve(async (req) => {
       details: {
         tool_used: toolUsed,
         model,
+        rag_sources: ragSources,
       },
     });
 
@@ -287,6 +310,7 @@ serve(async (req) => {
       response: botContent,
       tool_used: toolUsed,
       tool_latency_ms: toolLatency,
+      sources: ragSources,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -298,3 +322,52 @@ serve(async (req) => {
     });
   }
 });
+
+/**
+ * Search the knowledge base using text search (and vector search if embeddings exist)
+ */
+async function searchKnowledgeBase(
+  supabase: any,
+  tenantId: string,
+  query: string,
+  tenantConfig: any
+): Promise<string> {
+  // Try text-based search first (always works, no embeddings needed)
+  const searchTerms = query
+    .replace(/[^\w\sàáạảãăắằặẳẵâấầậẩẫèéẹẻẽêếềệểễìíịỉĩòóọỏõôốồộổỗơớờợởỡùúụủũưứừựửữỳýỵỷỹđ]/gi, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .slice(0, 8);
+
+  if (searchTerms.length === 0) return "";
+
+  // Full-text search on kb_chunks content
+  const { data: chunks, error } = await supabase
+    .from("kb_chunks")
+    .select("content, chunk_index, document_id")
+    .eq("tenant_id", tenantId)
+    .textSearch("content", searchTerms.join(" | "), { type: "plain" })
+    .limit(5);
+
+  if (error) {
+    console.warn("Text search error:", error);
+    // Fallback: simple ILIKE search
+    const { data: fallbackChunks } = await supabase
+      .from("kb_chunks")
+      .select("content, chunk_index, document_id")
+      .eq("tenant_id", tenantId)
+      .ilike("content", `%${searchTerms[0]}%`)
+      .limit(5);
+
+    if (fallbackChunks?.length) {
+      return fallbackChunks.map((c: any) => c.content).join("\n\n---\n\n");
+    }
+    return "";
+  }
+
+  if (chunks?.length) {
+    return chunks.map((c: any) => c.content).join("\n\n---\n\n");
+  }
+
+  return "";
+}

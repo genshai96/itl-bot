@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Tenants from "./pages/Tenants";
 import TenantDetail from "./pages/TenantDetail";
 import Conversations from "./pages/Conversations";
+import HandoffQueue from "./pages/HandoffQueue";
 import Settings from "./pages/Settings";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Analytics from "./pages/Analytics";
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/tenants" element={<Tenants />} />
           <Route path="/tenants/:tenantId" element={<TenantDetail />} />
           <Route path="/conversations" element={<Conversations />} />
+          <Route path="/handoff" element={<HandoffQueue />} />
           <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/analytics" element={<Analytics />} />
