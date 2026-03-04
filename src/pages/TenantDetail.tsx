@@ -215,15 +215,6 @@ const TenantDetail = () => {
     }
   };
 
-  const toggleTool = async (toolId: string, enabled: boolean) => {
-    const { error } = await supabase.from("tool_definitions").update({ enabled }).eq("id", toolId);
-    if (error) toast.error("Lỗi cập nhật tool");
-  };
-
-  const deleteTool = async (toolId: string) => {
-    const { error } = await supabase.from("tool_definitions").delete().eq("id", toolId);
-    if (error) toast.error("Lỗi xóa tool");
-  };
 
   // Test chat
   const sendTestMessage = async () => {
