@@ -158,6 +158,7 @@ serve(async (req) => {
       ],
       temperature: tenantConfig.temperature || 0.3,
       max_tokens: tenantConfig.max_tokens || 2048,
+      stream: false,
     };
     if (toolsPayload) {
       llmPayload.tools = toolsPayload;
