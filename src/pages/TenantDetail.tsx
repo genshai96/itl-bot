@@ -19,6 +19,7 @@ import {
   useKbDocuments, useToolDefinitions, useConversations, useDeleteTenant,
 } from "@/hooks/use-data";
 import ToolManager from "@/components/tools/ToolManager";
+import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
@@ -633,7 +634,7 @@ const TenantDetail = () => {
                       </div>
                     )}
                     <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
-                      <p className="text-sm whitespace-pre-line">{msg.content}</p>
+                      <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
                     </div>
                     {msg.role === "user" && (
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary mt-1">
