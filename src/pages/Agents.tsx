@@ -53,7 +53,7 @@ const Agents = () => {
       await createRole.mutateAsync({
         user_id: newRole.userId,
         role: newRole.role,
-        tenant_id: newRole.tenantId || null,
+        tenant_id: newRole.tenantId && newRole.tenantId !== "__none" ? newRole.tenantId : null,
       });
       toast.success("Đã gán role thành công!");
       setShowAssign(false);
