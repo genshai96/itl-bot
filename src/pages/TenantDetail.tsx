@@ -58,7 +58,7 @@ const TenantDetail = () => {
     maxTokens: "2048",
   });
 
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [connectionOk, setConnectionOk] = useState(false);
 
