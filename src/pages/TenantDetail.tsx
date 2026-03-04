@@ -92,13 +92,26 @@ const TenantDetail = () => {
     { id: 3, name: "Quy trình báo lỗi kỹ thuật", chunks: 25, status: "processing", updatedAt: "2026-03-04" },
   ];
 
-  const fetchModels = () => {
+  const [searchModel, setSearchModel] = useState("");
+
+  const fetchModels = async () => {
+    if (!provider.endpoint || !provider.apiKey) {
+      toast.error("Vui lòng nhập endpoint và API key trước");
+      return;
+    }
     setLoadingModels(true);
-    setTimeout(() => {
-      setModels(["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "claude-3.5-sonnet", "gemini-2.5-flash"]);
+    setConnectionOk(false);
+    try {
+      const result = await fetchProviderModels(provider.endpoint, provider.apiKey);
+      setModels(result);
       setConnectionOk(true);
+      toast.success(`Tìm thấy ${result.length} models`);
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : "Không thể kết nối tới provider");
+    } finally {
       setLoadingModels(false);
-    }, 1200);
+    }
   };
 
   const embedCode = `<!-- AI Support Widget - ${tenant.name} -->
