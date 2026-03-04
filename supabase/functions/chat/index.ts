@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { tenant_id, message, conversation_id, end_user } = await req.json();
+    const { tenant_id, message, conversation_id, end_user, attachments } = await req.json();
 
     if (!tenant_id || !message) {
       return new Response(JSON.stringify({ error: "tenant_id and message are required" }), {
