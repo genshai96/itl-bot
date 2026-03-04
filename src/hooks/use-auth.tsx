@@ -75,6 +75,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  if (!context) {
+    // Return safe defaults when outside provider (e.g. during HMR)
+    return {
+      user: null,
+      session: null,
+      loading: true,
+      signUp: async () => {},
+      signIn: async () => {},
+      signOut: async () => {},
+      resetPassword: async () => {},
+    } as AuthContextType;
+  }
   return context;
 }
