@@ -46,3 +46,30 @@ export async function fetchProviderModels(endpoint: string, apiKey: string): Pro
   if (data?.error) throw new Error(data.error);
   return (data?.models || []) as ModelInfo[];
 }
+
+// ==================== DOCUMENT PROCESSING ====================
+export async function processDocument({
+  tenantId,
+  documentId,
+  content,
+  chunkSize = 500,
+  chunkOverlap = 50,
+}: {
+  tenantId: string;
+  documentId: string;
+  content: string;
+  chunkSize?: number;
+  chunkOverlap?: number;
+}) {
+  const { data, error } = await supabase.functions.invoke("process-document", {
+    body: {
+      tenant_id: tenantId,
+      document_id: documentId,
+      content,
+      chunk_size: chunkSize,
+      chunk_overlap: chunkOverlap,
+    },
+  });
+  if (error) throw error;
+  return data as { success: boolean; chunks_created: number; embeddings_generated: boolean };
+}
