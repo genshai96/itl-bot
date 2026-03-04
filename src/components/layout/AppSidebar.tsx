@@ -1,4 +1,5 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/use-auth";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -9,6 +10,7 @@ import {
   BarChart3,
   Building2,
   AlertTriangle,
+  LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -24,6 +26,13 @@ const navItems = [
 
 export const AppSidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login");
+  };
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar flex flex-col"
@@ -61,17 +70,25 @@ export const AppSidebar = () => {
         })}
       </nav>
 
-      {/* Tenant selector */}
-      <div className="border-t border-sidebar-border p-4">
-        <NavLink to="/tenants" className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5 hover:bg-sidebar-accent/80 transition-colors">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20 text-xs font-bold text-sidebar-primary">
-            AC
+      {/* User + sign out */}
+      <div className="border-t border-sidebar-border p-4 space-y-2">
+        {user && (
+          <div className="flex items-center gap-3 px-3 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20 text-xs font-bold text-sidebar-primary">
+              {(user.email || "?").charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-sidebar-accent-foreground truncate">{user.email}</p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-sidebar-accent-foreground truncate">Acme Corp</p>
-            <p className="text-[10px] text-sidebar-muted">4 tenants · Manage →</p>
-          </div>
-        </NavLink>
+        )}
+        <button
+          onClick={handleSignOut}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-destructive transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Đăng xuất
+        </button>
       </div>
     </aside>
   );
