@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { fetchProviderModels, sendChatMessage, type ModelInfo } from "@/lib/api";
+import { fetchProviderModels, sendChatMessage, uploadChatAttachment, extractFileContent, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import {
 } from "@/hooks/use-data";
 import ToolManager from "@/components/tools/ToolManager";
 import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
+import { ChatFileUpload, type ChatAttachment } from "@/components/chat/ChatFileUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
@@ -68,10 +69,11 @@ const TenantDetail = () => {
   const [saving, setSaving] = useState(false);
 
   // Test chat state
-  const [testMessages, setTestMessages] = useState<{ role: string; content: string }[]>([]);
+  const [testMessages, setTestMessages] = useState<{ role: string; content: string; imageUrls?: string[] }[]>([]);
   const [testInput, setTestInput] = useState("");
   const [testSending, setTestSending] = useState(false);
   const [testConvId, setTestConvId] = useState<string | undefined>(undefined);
+  const [testAttachments, setTestAttachments] = useState<ChatAttachment[]>([]);
   const testEndRef = useRef<HTMLDivElement>(null);
 
   // Sync DB config to local state
@@ -219,17 +221,55 @@ const TenantDetail = () => {
 
   // Test chat
   const sendTestMessage = async () => {
-    if (!testInput.trim() || !tenantId) return;
+    if ((!testInput.trim() && testAttachments.length === 0) || !tenantId) return;
     const userMsg = testInput.trim();
+    const msgAttachments = [...testAttachments];
+
+    const imagePreviewUrls = msgAttachments
+      .filter((a) => a.type === "image" && a.preview)
+      .map((a) => a.preview!);
+
     setTestInput("");
-    setTestMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setTestAttachments([]);
+    setTestMessages((prev) => [...prev, {
+      role: "user",
+      content: userMsg || `📎 ${msgAttachments.map((a) => a.file.name).join(", ")}`,
+      imageUrls: imagePreviewUrls,
+    }]);
     setTestSending(true);
+
     try {
+      // Upload & extract files
+      let processedAttachments: Array<{ url: string; type: string; content?: string; strategy?: string }> = [];
+      if (msgAttachments.length > 0) {
+        const uploadedUrls: string[] = [];
+        for (const att of msgAttachments) {
+          try {
+            const url = await uploadChatAttachment(att.file, tenantId);
+            uploadedUrls.push(url);
+          } catch (err) {
+            console.error("Upload failed:", err);
+            toast.error(`Upload thất bại: ${att.file.name}`);
+          }
+        }
+        if (uploadedUrls.length > 0) {
+          try {
+            const extracted = await extractFileContent(uploadedUrls, tenantId);
+            processedAttachments = extracted.results.map((r) => ({
+              url: r.url, type: r.type, content: r.content, strategy: r.strategy,
+            }));
+          } catch {
+            processedAttachments = uploadedUrls.map((url) => ({ url, type: "unknown" }));
+          }
+        }
+      }
+
       const result = await sendChatMessage({
         tenantId,
         message: userMsg,
         conversationId: testConvId,
         endUser: { name: "Admin Test" },
+        attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
       });
       setTestConvId(result.conversation_id);
       setTestMessages((prev) => [...prev, {
@@ -634,6 +674,9 @@ const TenantDetail = () => {
                       </div>
                     )}
                     <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
+                      {msg.imageUrls?.map((url, j) => (
+                        <img key={j} src={url} alt="" className="rounded-lg max-w-full max-h-32 mb-2 border" />
+                      ))}
                       <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
                     </div>
                     {msg.role === "user" && (
@@ -656,7 +699,33 @@ const TenantDetail = () => {
                 <div ref={testEndRef} />
               </div>
               <div className="border-t p-4">
+                {testAttachments.length > 0 && (
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {testAttachments.map((att, i) => (
+                      <div key={i} className="relative group">
+                        {att.type === "image" && att.preview ? (
+                          <img src={att.preview} alt="" className="h-12 w-12 rounded-lg object-cover border" />
+                        ) : (
+                          <div className="h-12 rounded-lg border bg-muted/50 flex items-center gap-1.5 px-2 text-[10px] text-muted-foreground max-w-[120px]">
+                            <FileText className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{att.file.name}</span>
+                          </div>
+                        )}
+                        <button onClick={() => setTestAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
+                  <ChatFileUpload
+                    attachments={[]}
+                    onAdd={(a) => setTestAttachments((prev) => [...prev, a])}
+                    onRemove={() => {}}
+                    disabled={testSending}
+                  />
                   <Input
                     value={testInput}
                     onChange={(e) => setTestInput(e.target.value)}
@@ -665,7 +734,7 @@ const TenantDetail = () => {
                     className="flex-1 h-10"
                     disabled={testSending}
                   />
-                  <Button size="icon" className="shrink-0 h-9 w-9 glow-primary" onClick={sendTestMessage} disabled={testSending || !testInput.trim()}>
+                  <Button size="icon" className="shrink-0 h-9 w-9 glow-primary" onClick={sendTestMessage} disabled={testSending || (!testInput.trim() && testAttachments.length === 0)}>
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
