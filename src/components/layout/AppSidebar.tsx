@@ -8,12 +8,14 @@ import {
   FileText,
   BarChart3,
   Building2,
+  AlertTriangle,
 } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/tenants", label: "Tenants", icon: Building2 },
-  { to: "/conversations", label: "Conversations", icon: MessageSquare, badge: 3 },
+  { to: "/conversations", label: "Conversations", icon: MessageSquare },
+  { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle },
   { to: "/knowledge", label: "Knowledge Base", icon: FileText },
   { to: "/agents", label: "Agents", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
