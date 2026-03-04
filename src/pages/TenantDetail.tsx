@@ -221,17 +221,55 @@ const TenantDetail = () => {
 
   // Test chat
   const sendTestMessage = async () => {
-    if (!testInput.trim() || !tenantId) return;
+    if ((!testInput.trim() && testAttachments.length === 0) || !tenantId) return;
     const userMsg = testInput.trim();
+    const msgAttachments = [...testAttachments];
+
+    const imagePreviewUrls = msgAttachments
+      .filter((a) => a.type === "image" && a.preview)
+      .map((a) => a.preview!);
+
     setTestInput("");
-    setTestMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setTestAttachments([]);
+    setTestMessages((prev) => [...prev, {
+      role: "user",
+      content: userMsg || `📎 ${msgAttachments.map((a) => a.file.name).join(", ")}`,
+      imageUrls: imagePreviewUrls,
+    }]);
     setTestSending(true);
+
     try {
+      // Upload & extract files
+      let processedAttachments: Array<{ url: string; type: string; content?: string; strategy?: string }> = [];
+      if (msgAttachments.length > 0) {
+        const uploadedUrls: string[] = [];
+        for (const att of msgAttachments) {
+          try {
+            const url = await uploadChatAttachment(att.file, tenantId);
+            uploadedUrls.push(url);
+          } catch (err) {
+            console.error("Upload failed:", err);
+            toast.error(`Upload thất bại: ${att.file.name}`);
+          }
+        }
+        if (uploadedUrls.length > 0) {
+          try {
+            const extracted = await extractFileContent(uploadedUrls, tenantId);
+            processedAttachments = extracted.results.map((r) => ({
+              url: r.url, type: r.type, content: r.content, strategy: r.strategy,
+            }));
+          } catch {
+            processedAttachments = uploadedUrls.map((url) => ({ url, type: "unknown" }));
+          }
+        }
+      }
+
       const result = await sendChatMessage({
         tenantId,
         message: userMsg,
         conversationId: testConvId,
         endUser: { name: "Admin Test" },
+        attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
       });
       setTestConvId(result.conversation_id);
       setTestMessages((prev) => [...prev, {
