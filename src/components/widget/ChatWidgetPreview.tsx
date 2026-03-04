@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { MessageSquare, X, Send, Minus, User } from "lucide-react";
+import { MessageSquare, X, Send, Minus, User, Loader2 } from "lucide-react";
+import { sendChatMessage } from "@/lib/api";
 
 interface WidgetConfig {
   tenantId: string;
