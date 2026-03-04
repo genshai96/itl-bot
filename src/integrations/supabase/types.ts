@@ -14,16 +14,718 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      audit_logs: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_type: string
+          created_at: string
+          details: Json | null
+          id: string
+          resource_id: string | null
+          resource_type: string | null
+          tenant_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_type: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          resource_id?: string | null
+          resource_type?: string | null
+          tenant_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_type?: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          resource_id?: string | null
+          resource_type?: string | null
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_labels: {
+        Row: {
+          auto_labeled: boolean | null
+          conversation_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+        }
+        Insert: {
+          auto_labeled?: boolean | null
+          conversation_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label: string
+        }
+        Update: {
+          auto_labeled?: boolean | null
+          conversation_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_labels_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          assigned_agent_id: string | null
+          confidence: number | null
+          created_at: string
+          end_user_email: string | null
+          end_user_name: string | null
+          end_user_phone: string | null
+          id: string
+          intent: string | null
+          metadata: Json | null
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_agent_id?: string | null
+          confidence?: number | null
+          created_at?: string
+          end_user_email?: string | null
+          end_user_name?: string | null
+          end_user_phone?: string | null
+          id?: string
+          intent?: string | null
+          metadata?: Json | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_agent_id?: string | null
+          confidence?: number | null
+          created_at?: string
+          end_user_email?: string | null
+          end_user_name?: string | null
+          end_user_phone?: string | null
+          id?: string
+          intent?: string | null
+          metadata?: Json | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_definitions: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_definitions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flow_versions: {
+        Row: {
+          config: Json
+          created_at: string
+          flow_id: string
+          id: string
+          published_at: string | null
+          status: string
+          version: number
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          flow_id: string
+          id?: string
+          published_at?: string | null
+          status?: string
+          version?: number
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          flow_id?: string
+          id?: string
+          published_at?: string | null
+          status?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_versions_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flow_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      handoff_events: {
+        Row: {
+          assigned_to: string | null
+          conversation_id: string
+          created_at: string
+          id: string
+          priority: string
+          reason: string
+          resolved_at: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          conversation_id: string
+          created_at?: string
+          id?: string
+          priority?: string
+          reason: string
+          resolved_at?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          assigned_to?: string | null
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          priority?: string
+          reason?: string
+          resolved_at?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "handoff_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "handoff_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          document_id: string
+          embedding: string | null
+          id: string
+          metadata: Json | null
+          tenant_id: string
+        }
+        Insert: {
+          chunk_index?: number
+          content: string
+          created_at?: string
+          document_id: string
+          embedding?: string | null
+          id?: string
+          metadata?: Json | null
+          tenant_id: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          embedding?: string | null
+          id?: string
+          metadata?: Json | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_chunks_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "kb_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_chunks_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_documents: {
+        Row: {
+          chunk_count: number | null
+          created_at: string
+          file_url: string | null
+          id: string
+          metadata: Json | null
+          name: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          chunk_count?: number | null
+          created_at?: string
+          file_url?: string | null
+          id?: string
+          metadata?: Json | null
+          name: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          chunk_count?: number | null
+          created_at?: string
+          file_url?: string | null
+          id?: string
+          metadata?: Json | null
+          name?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_documents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          confidence: number | null
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          metadata: Json | null
+          role: string
+          sources: Json | null
+          tool_latency_ms: number | null
+          tool_used: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          role: string
+          sources?: Json | null
+          tool_latency_ms?: number | null
+          tool_used?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          role?: string
+          sources?: Json | null
+          tool_latency_ms?: number | null
+          tool_used?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      tenant_configs: {
+        Row: {
+          confidence_threshold: number | null
+          created_at: string
+          id: string
+          max_tokens: number | null
+          max_tool_retries: number | null
+          pii_masking: boolean | null
+          prompt_injection_defense: boolean | null
+          provider_api_key: string | null
+          provider_endpoint: string | null
+          provider_model: string | null
+          system_prompt: string | null
+          temperature: number | null
+          tenant_id: string
+          updated_at: string
+          widget_auto_open: boolean | null
+          widget_auto_open_delay: number | null
+          widget_collect_email: boolean | null
+          widget_collect_name: boolean | null
+          widget_collect_phone: boolean | null
+          widget_placeholder: string | null
+          widget_position: string | null
+          widget_primary_color: string | null
+          widget_show_powered_by: boolean | null
+          widget_subtitle: string | null
+          widget_title: string | null
+          widget_welcome_message: string | null
+        }
+        Insert: {
+          confidence_threshold?: number | null
+          created_at?: string
+          id?: string
+          max_tokens?: number | null
+          max_tool_retries?: number | null
+          pii_masking?: boolean | null
+          prompt_injection_defense?: boolean | null
+          provider_api_key?: string | null
+          provider_endpoint?: string | null
+          provider_model?: string | null
+          system_prompt?: string | null
+          temperature?: number | null
+          tenant_id: string
+          updated_at?: string
+          widget_auto_open?: boolean | null
+          widget_auto_open_delay?: number | null
+          widget_collect_email?: boolean | null
+          widget_collect_name?: boolean | null
+          widget_collect_phone?: boolean | null
+          widget_placeholder?: string | null
+          widget_position?: string | null
+          widget_primary_color?: string | null
+          widget_show_powered_by?: boolean | null
+          widget_subtitle?: string | null
+          widget_title?: string | null
+          widget_welcome_message?: string | null
+        }
+        Update: {
+          confidence_threshold?: number | null
+          created_at?: string
+          id?: string
+          max_tokens?: number | null
+          max_tool_retries?: number | null
+          pii_masking?: boolean | null
+          prompt_injection_defense?: boolean | null
+          provider_api_key?: string | null
+          provider_endpoint?: string | null
+          provider_model?: string | null
+          system_prompt?: string | null
+          temperature?: number | null
+          tenant_id?: string
+          updated_at?: string
+          widget_auto_open?: boolean | null
+          widget_auto_open_delay?: number | null
+          widget_collect_email?: boolean | null
+          widget_collect_name?: boolean | null
+          widget_collect_phone?: boolean | null
+          widget_placeholder?: string | null
+          widget_position?: string | null
+          widget_primary_color?: string | null
+          widget_show_powered_by?: boolean | null
+          widget_subtitle?: string | null
+          widget_title?: string | null
+          widget_welcome_message?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_configs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenants: {
+        Row: {
+          created_at: string
+          domain: string | null
+          id: string
+          name: string
+          slug: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          domain?: string | null
+          id?: string
+          name: string
+          slug: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          domain?: string | null
+          id?: string
+          name?: string
+          slug?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      tool_call_logs: {
+        Row: {
+          conversation_id: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          input: Json | null
+          latency_ms: number | null
+          output: Json | null
+          status: string
+          tenant_id: string
+          tool_id: string
+        }
+        Insert: {
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input?: Json | null
+          latency_ms?: number | null
+          output?: Json | null
+          status: string
+          tenant_id: string
+          tool_id: string
+        }
+        Update: {
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input?: Json | null
+          latency_ms?: number | null
+          output?: Json | null
+          status?: string
+          tenant_id?: string
+          tool_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tool_call_logs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tool_call_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tool_definitions: {
+        Row: {
+          created_at: string
+          description: string | null
+          enabled: boolean | null
+          endpoint: string
+          id: string
+          input_schema: Json | null
+          name: string
+          required_roles: Database["public"]["Enums"]["app_role"][] | null
+          tenant_id: string
+          tool_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          enabled?: boolean | null
+          endpoint: string
+          id?: string
+          input_schema?: Json | null
+          name: string
+          required_roles?: Database["public"]["Enums"]["app_role"][] | null
+          tenant_id: string
+          tool_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          enabled?: boolean | null
+          endpoint?: string
+          id?: string
+          input_schema?: Json | null
+          name?: string
+          required_roles?: Database["public"]["Enums"]["app_role"][] | null
+          tenant_id?: string
+          tool_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tool_definitions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          tenant_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          tenant_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          tenant_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _tenant_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_system_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_tenant_member: {
+        Args: { _tenant_id: string; _user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role:
+        | "system_admin"
+        | "tenant_admin"
+        | "support_lead"
+        | "support_agent"
+        | "end_user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +852,14 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: [
+        "system_admin",
+        "tenant_admin",
+        "support_lead",
+        "support_agent",
+        "end_user",
+      ],
+    },
   },
 } as const
