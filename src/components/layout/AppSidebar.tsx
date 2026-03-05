@@ -11,6 +11,8 @@ import {
   Building2,
   AlertTriangle,
   LogOut,
+  GitBranch,
+  ScrollText,
 } from "lucide-react";
 
 const navItems = [
@@ -19,8 +21,10 @@ const navItems = [
   { to: "/conversations", label: "Conversations", icon: MessageSquare },
   { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle },
   { to: "/knowledge", label: "Knowledge Base", icon: FileText },
+  { to: "/flows", label: "Flow Builder", icon: GitBranch },
   { to: "/agents", label: "Agents", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/audit-logs", label: "Audit Logs", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -49,7 +53,7 @@ export const AppSidebar = () => {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to || 
             (item.to !== "/" && location.pathname.startsWith(item.to));
