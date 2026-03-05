@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { fetchProviderModels, sendChatMessage, uploadChatAttachment, extractFileContent, type ModelInfo } from "@/lib/api";
+import { fetchProviderModels, sendChatMessage, sendChatMessageStream, uploadChatAttachment, extractFileContent, type ModelInfo } from "@/lib/api";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -264,18 +264,53 @@ const TenantDetail = () => {
         }
       }
 
-      const result = await sendChatMessage({
+      // Add empty bot message placeholder for streaming
+      const botIdx = testMessages.length + 1; // index after user msg
+      setTestMessages((prev) => [...prev, { role: "bot", content: "" }]);
+
+      await sendChatMessageStream({
         tenantId,
         message: userMsg,
         conversationId: testConvId,
         endUser: { name: "Admin Test" },
         attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
+        onToken: (token) => {
+          setTestMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "bot") {
+              updated[updated.length - 1] = { ...last, content: last.content + token };
+            }
+            return updated;
+          });
+        },
+        onDone: (result) => {
+          setTestConvId(result.conversation_id);
+          if (result.tool_used) {
+            setTestMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.role === "bot") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content + `\n\n🔧 Tool: ${result.tool_used} (${result.tool_latency_ms}ms)`,
+                };
+              }
+              return updated;
+            });
+          }
+        },
+        onError: (err) => {
+          setTestMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "bot") {
+              updated[updated.length - 1] = { ...last, content: `❌ Lỗi: ${err.message}` };
+            }
+            return updated;
+          });
+        },
       });
-      setTestConvId(result.conversation_id);
-      setTestMessages((prev) => [...prev, {
-        role: "bot",
-        content: result.response + (result.tool_used ? `\n\n🔧 Tool: ${result.tool_used} (${result.tool_latency_ms}ms)` : ""),
-      }]);
     } catch (err: any) {
       setTestMessages((prev) => [...prev, { role: "bot", content: `❌ Lỗi: ${err.message || "Unknown error"}` }]);
     } finally {

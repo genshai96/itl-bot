@@ -6,6 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import mermaid from "mermaid";
+import * as XLSX from "xlsx";
 import { Download, FileSpreadsheet, FileText, Copy, Check } from "lucide-react";
 
 // Initialize mermaid
@@ -35,7 +36,7 @@ interface ChartBlock {
 interface FileBlock {
   filename: string;
   content: string;
-  type: "csv" | "txt" | "json" | "xml" | "html" | "md";
+  type: "csv" | "txt" | "json" | "xml" | "html" | "md" | "xlsx";
 }
 
 // ==================== EXTRACTORS ====================
@@ -72,7 +73,7 @@ function extractFiles(text: string): { cleanText: string; files: FileBlock[] } {
   const files: FileBlock[] = [];
   const cleanText = text.replace(/```file:(\S+)\s*\n([\s\S]*?)```/g, (_, filename, content) => {
     const ext = filename.split(".").pop()?.toLowerCase() || "txt";
-    const validTypes = ["csv", "txt", "json", "xml", "html", "md"];
+    const validTypes = ["csv", "txt", "json", "xml", "html", "md", "xlsx"];
     files.push({
       filename,
       content: content.trim(),
@@ -90,6 +91,47 @@ function extractImages(text: string): { cleanText: string; images: string[] } {
     return "";
   });
   return { cleanText: cleanText.trim(), images };
+}
+
+// ==================== XLSX HELPER ====================
+
+function csvToXlsxBlob(csvContent: string, filename: string): Blob {
+  // Parse CSV into array of arrays
+  const rows = csvContent.split("\n").map(row => {
+    // Handle quoted CSV fields
+    const fields: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[i];
+      if (ch === '"') {
+        inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        fields.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  }).filter(r => r.some(c => c.length > 0));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Auto-width columns
+  if (rows.length > 0) {
+    ws["!cols"] = rows[0].map((_, ci) => {
+      const maxLen = Math.max(...rows.map(r => (r[ci] || "").length));
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
+    });
+  }
+
+  const sheetName = filename.replace(/\.[^.]+$/, "").slice(0, 31) || "Sheet1";
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const wbOut = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  return new Blob([wbOut], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 // ==================== RENDERERS ====================
@@ -154,7 +196,25 @@ function MermaidRenderer({ code }: { code: string }) {
 function FileDownloadBlock({ file }: { file: FileBlock }) {
   const [copied, setCopied] = useState(false);
 
-  const handleDownload = () => {
+  const isXlsx = file.type === "xlsx" || file.filename.endsWith(".xlsx");
+  const isCsv = file.type === "csv" || file.filename.endsWith(".csv");
+
+  const handleDownload = (asXlsx?: boolean) => {
+    if (asXlsx || isXlsx) {
+      // Generate real Excel file from CSV content
+      const blob = csvToXlsxBlob(file.content, file.filename);
+      const finalName = file.filename.replace(/\.(csv|txt)$/, ".xlsx").replace(/(?<!\.xlsx)$/, s => s.endsWith(".xlsx") ? "" : ".xlsx");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = finalName.endsWith(".xlsx") ? finalName : `${finalName}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const mimeTypes: Record<string, string> = {
       csv: "text/csv",
       txt: "text/plain",
@@ -180,7 +240,7 @@ function FileDownloadBlock({ file }: { file: FileBlock }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const FileIcon = file.type === "csv" ? FileSpreadsheet : FileText;
+  const FileIcon = (isCsv || isXlsx) ? FileSpreadsheet : FileText;
 
   return (
     <div className="my-2 rounded-lg border bg-card overflow-hidden">
@@ -194,16 +254,26 @@ function FileDownloadBlock({ file }: { file: FileBlock }) {
           <button
             onClick={handleCopy}
             className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-            title="Copy nội dung"
+            title="Copy"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
+          {(isCsv || isXlsx) && (
+            <button
+              onClick={() => handleDownload(true)}
+              className="h-7 px-2.5 rounded-md flex items-center gap-1.5 bg-green-600 text-white hover:bg-green-700 transition-colors text-[10px] font-medium"
+              title="Download as Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="h-3 w-3" />
+              Excel
+            </button>
+          )}
           <button
-            onClick={handleDownload}
+            onClick={() => handleDownload(false)}
             className="h-7 px-2.5 rounded-md flex items-center gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-[10px] font-medium"
           >
             <Download className="h-3 w-3" />
-            Download
+            {isCsv ? "CSV" : "Download"}
           </button>
         </div>
       </div>

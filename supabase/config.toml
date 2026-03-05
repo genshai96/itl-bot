@@ -17,3 +17,9 @@ verify_jwt = false
 
 [functions.generate-embeddings]
 verify_jwt = false
+
+[functions.chat-stream]
+verify_jwt = false
+
+[functions.extract-file-content]
+verify_jwt = false
