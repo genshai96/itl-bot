@@ -236,6 +236,37 @@ serve(async (req) => {
     let systemPrompt = tenantConfig.system_prompt ||
       `You are an AI support assistant. Be helpful, concise, and professional. If you're not confident about an answer (below ${tenantConfig.confidence_threshold || 0.6} confidence), suggest escalating to a human agent. Always cite sources when using knowledge base information.`;
 
+    // Add rich content format instructions
+    systemPrompt += `
+
+--- RESPONSE FORMATTING ---
+You support special rich content blocks in your responses:
+
+1. **Mermaid diagrams** - Use for flowcharts, sequence diagrams, etc:
+\`\`\`mermaid
+graph TD
+A[Start] --> B[Step 1]
+B --> C{Decision}
+C -- Yes --> D[Result A]
+C -- No --> E[Result B]
+\`\`\`
+
+2. **Charts** - Use for data visualization:
+\`\`\`chart
+{"type":"bar","title":"Sales","data":[{"month":"Jan","value":100},{"month":"Feb","value":200}]}
+\`\`\`
+
+3. **Downloadable files** - Use when user asks for files/exports/Excel/CSV:
+\`\`\`file:report.csv
+col1,col2,col3
+data1,data2,data3
+\`\`\`
+Supported extensions: .csv, .txt, .json, .xml, .html, .md
+When user asks for Excel, generate a .csv file instead (compatible with Excel).
+
+Use these formats when appropriate. For diagrams/flowcharts, always prefer mermaid over text descriptions.
+--- END FORMATTING ---`;
+
     if (ragContext) {
       systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\nUse the following information to answer the user's question. Cite the source documents when relevant.\n\n${ragContext}\n--- END CONTEXT ---`;
     }
