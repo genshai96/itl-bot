@@ -54,6 +54,95 @@ export async function sendChatMessage({
   };
 }
 
+// ==================== STREAMING CHAT ====================
+export async function sendChatMessageStream({
+  tenantId,
+  message,
+  conversationId,
+  endUser,
+  attachments,
+  onToken,
+  onDone,
+  onError,
+}: {
+  tenantId: string;
+  message: string;
+  conversationId?: string;
+  endUser?: { name?: string; email?: string; phone?: string };
+  attachments?: Array<{ url: string; type: string; content?: string }>;
+  onToken: (token: string) => void;
+  onDone: (result: { conversation_id: string; full_response: string; tool_used?: string; tool_latency_ms?: number }) => void;
+  onError: (err: Error) => void;
+}) {
+  try {
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const url = `https://${projectId}.supabase.co/functions/v1/chat-stream`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": anonKey,
+        "Authorization": `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        message,
+        conversation_id: conversationId,
+        end_user: endUser,
+        attachments,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No readable stream");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullResponse = "";
+    let convId = conversationId || "";
+    let toolUsed: string | undefined;
+    let toolLatency: number | undefined;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") continue;
+
+        try {
+          const evt = JSON.parse(payload);
+          if (evt.type === "token") {
+            fullResponse += evt.content;
+            onToken(evt.content);
+          } else if (evt.type === "meta") {
+            convId = evt.conversation_id || convId;
+            toolUsed = evt.tool_used;
+            toolLatency = evt.tool_latency_ms;
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    onDone({ conversation_id: convId, full_response: fullResponse, tool_used: toolUsed, tool_latency_ms: toolLatency });
+  } catch (err: any) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
 // ==================== MODELS ====================
 
 export interface ModelInfo {
