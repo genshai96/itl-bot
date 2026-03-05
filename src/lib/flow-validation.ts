@@ -62,7 +62,7 @@ export function validateFlow(nodes: Node[], edges: Edge[]): ValidationError[] {
   if (triggers.length > 0 && nodes.length > 1) {
     const reachable = new Set<string>();
     const queue = triggers.map((t) => t.id);
-    reachable.add(...queue);
+    queue.forEach((id) => reachable.add(id));
     while (queue.length > 0) {
       const current = queue.shift()!;
       reachable.add(current);
