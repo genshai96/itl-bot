@@ -1,10 +1,20 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, useState, useId } from "react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
+import mermaid from "mermaid";
+import { Download, FileSpreadsheet, FileText, Copy, Check } from "lucide-react";
+
+// Initialize mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "dark",
+  securityLevel: "loose",
+  fontFamily: "inherit",
+});
 
 const CHART_COLORS = [
   "hsl(var(--primary))",
@@ -22,6 +32,14 @@ interface ChartBlock {
   yKey?: string;
 }
 
+interface FileBlock {
+  filename: string;
+  content: string;
+  type: "csv" | "txt" | "json" | "xml" | "html" | "md";
+}
+
+// ==================== EXTRACTORS ====================
+
 function extractCharts(text: string): { cleanText: string; charts: ChartBlock[] } {
   const charts: ChartBlock[] = [];
   const cleanText = text.replace(/```chart\s*\n([\s\S]*?)```/g, (_, json) => {
@@ -29,7 +47,7 @@ function extractCharts(text: string): { cleanText: string; charts: ChartBlock[] 
       const parsed = JSON.parse(json.trim());
       if (parsed.data && Array.isArray(parsed.data)) {
         charts.push(parsed as ChartBlock);
-        return ""; // remove from text
+        return "";
       }
     } catch { /* ignore */ }
     return _;
@@ -37,14 +55,163 @@ function extractCharts(text: string): { cleanText: string; charts: ChartBlock[] 
   return { cleanText: cleanText.trim(), charts };
 }
 
+function extractMermaid(text: string): { cleanText: string; diagrams: string[] } {
+  const diagrams: string[] = [];
+  const cleanText = text.replace(/```mermaid\s*\n([\s\S]*?)```/g, (_, code) => {
+    const trimmed = code.trim();
+    if (trimmed) {
+      diagrams.push(trimmed);
+      return "";
+    }
+    return _;
+  });
+  return { cleanText: cleanText.trim(), diagrams };
+}
+
+function extractFiles(text: string): { cleanText: string; files: FileBlock[] } {
+  const files: FileBlock[] = [];
+  const cleanText = text.replace(/```file:(\S+)\s*\n([\s\S]*?)```/g, (_, filename, content) => {
+    const ext = filename.split(".").pop()?.toLowerCase() || "txt";
+    const validTypes = ["csv", "txt", "json", "xml", "html", "md"];
+    files.push({
+      filename,
+      content: content.trim(),
+      type: validTypes.includes(ext) ? ext as FileBlock["type"] : "txt",
+    });
+    return "";
+  });
+  return { cleanText: cleanText.trim(), files };
+}
+
 function extractImages(text: string): { cleanText: string; images: string[] } {
   const images: string[] = [];
-  // Match base64 images or URLs in markdown image syntax
   const cleanText = text.replace(/!\[([^\]]*)\]\((data:image\/[^)]+|https?:\/\/[^)]+)\)/g, (_, _alt, url) => {
     images.push(url);
     return "";
   });
   return { cleanText: cleanText.trim(), images };
+}
+
+// ==================== RENDERERS ====================
+
+function MermaidRenderer({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const uniqueId = useId().replace(/:/g, "");
+  const [svg, setSvg] = useState<string>("");
+  const [error, setError] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const render = async () => {
+      try {
+        const id = `mermaid-${uniqueId}-${Date.now()}`;
+        const { svg: rendered } = await mermaid.render(id, code);
+        if (!cancelled) {
+          setSvg(rendered);
+          setError("");
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e.message || "Diagram render failed");
+          setSvg("");
+        }
+      }
+    };
+    render();
+    return () => { cancelled = true; };
+  }, [code, uniqueId]);
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 my-2">
+        <p className="text-xs text-warning font-medium mb-1">⚠️ Diagram render error</p>
+        <pre className="text-[10px] text-muted-foreground overflow-x-auto">{code}</pre>
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div className="rounded-lg border bg-muted/30 p-4 my-2 animate-pulse">
+        <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">
+          Rendering diagram...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-lg border bg-card/50 p-3 overflow-x-auto">
+      <div
+        ref={containerRef}
+        className="flex justify-center [&_svg]:max-w-full [&_svg]:h-auto"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+    </div>
+  );
+}
+
+function FileDownloadBlock({ file }: { file: FileBlock }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleDownload = () => {
+    const mimeTypes: Record<string, string> = {
+      csv: "text/csv",
+      txt: "text/plain",
+      json: "application/json",
+      xml: "application/xml",
+      html: "text/html",
+      md: "text/markdown",
+    };
+    const blob = new Blob([file.content], { type: mimeTypes[file.type] || "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(file.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const FileIcon = file.type === "csv" ? FileSpreadsheet : FileText;
+
+  return (
+    <div className="my-2 rounded-lg border bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-muted/50 border-b">
+        <div className="flex items-center gap-2">
+          <FileIcon className="h-4 w-4 text-primary" />
+          <span className="text-xs font-medium">{file.filename}</span>
+          <span className="text-[10px] text-muted-foreground uppercase">{file.type}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleCopy}
+            className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+            title="Copy nội dung"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={handleDownload}
+            className="h-7 px-2.5 rounded-md flex items-center gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-[10px] font-medium"
+          >
+            <Download className="h-3 w-3" />
+            Download
+          </button>
+        </div>
+      </div>
+      <pre className="p-3 text-[11px] font-mono text-foreground/80 overflow-x-auto max-h-40 overflow-y-auto">
+        {file.content.slice(0, 2000)}{file.content.length > 2000 ? "\n..." : ""}
+      </pre>
+    </div>
+  );
 }
 
 function ChartRenderer({ chart }: { chart: ChartBlock }) {
@@ -94,9 +261,16 @@ function ChartRenderer({ chart }: { chart: ChartBlock }) {
   );
 }
 
+// ==================== MAIN RENDERER ====================
+
 export function ChatMessageRenderer({ content, role }: { content: string; role: "user" | "bot" | "assistant" }) {
-  const { cleanText: textAfterCharts, charts } = useMemo(() => extractCharts(content), [content]);
-  const { cleanText, images } = useMemo(() => extractImages(textAfterCharts), [textAfterCharts]);
+  const processed = useMemo(() => {
+    const { cleanText: t1, charts } = extractCharts(content);
+    const { cleanText: t2, diagrams } = extractMermaid(t1);
+    const { cleanText: t3, files } = extractFiles(t2);
+    const { cleanText, images } = extractImages(t3);
+    return { cleanText, charts, diagrams, files, images };
+  }, [content]);
 
   const isUser = role === "user";
 
@@ -106,7 +280,7 @@ export function ChatMessageRenderer({ content, role }: { content: string; role: 
 
   return (
     <div className="space-y-2">
-      {cleanText && (
+      {processed.cleanText && (
         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-table:my-2 text-sm">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -157,17 +331,25 @@ export function ChatMessageRenderer({ content, role }: { content: string; role: 
               ),
             }}
           >
-            {cleanText}
+            {processed.cleanText}
           </ReactMarkdown>
         </div>
       )}
 
-      {images.map((src, i) => (
+      {processed.images.map((src, i) => (
         <img key={i} src={src} alt="" className="rounded-lg max-w-full max-h-60 border" loading="lazy" />
       ))}
 
-      {charts.map((chart, i) => (
+      {processed.diagrams.map((code, i) => (
+        <MermaidRenderer key={i} code={code} />
+      ))}
+
+      {processed.charts.map((chart, i) => (
         <ChartRenderer key={i} chart={chart} />
+      ))}
+
+      {processed.files.map((file, i) => (
+        <FileDownloadBlock key={i} file={file} />
       ))}
     </div>
   );
