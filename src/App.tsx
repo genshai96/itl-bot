@@ -14,6 +14,8 @@ import Settings from "./pages/Settings";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Analytics from "./pages/Analytics";
 import Agents from "./pages/Agents";
+import FlowBuilder from "./pages/FlowBuilder";
+import AuditLogs from "./pages/AuditLogs";
 import WidgetDemo from "./pages/WidgetDemo";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -47,6 +49,8 @@ const App = () => (
             <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
             <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/flows" element={<ProtectedRoute><FlowBuilder /></ProtectedRoute>} />
+            <Route path="/audit-logs" element={<ProtectedRoute><AuditLogs /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />

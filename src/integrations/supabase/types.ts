@@ -441,11 +441,13 @@ export type Database = {
       }
       tenant_configs: {
         Row: {
+          api_key: string | null
           confidence_threshold: number | null
           created_at: string
           id: string
           max_tokens: number | null
           max_tool_retries: number | null
+          notification_email: string | null
           pii_masking: boolean | null
           prompt_injection_defense: boolean | null
           provider_api_key: string | null
@@ -455,6 +457,7 @@ export type Database = {
           temperature: number | null
           tenant_id: string
           updated_at: string
+          webhook_url: string | null
           widget_auto_open: boolean | null
           widget_auto_open_delay: number | null
           widget_collect_email: boolean | null
@@ -469,11 +472,13 @@ export type Database = {
           widget_welcome_message: string | null
         }
         Insert: {
+          api_key?: string | null
           confidence_threshold?: number | null
           created_at?: string
           id?: string
           max_tokens?: number | null
           max_tool_retries?: number | null
+          notification_email?: string | null
           pii_masking?: boolean | null
           prompt_injection_defense?: boolean | null
           provider_api_key?: string | null
@@ -483,6 +488,7 @@ export type Database = {
           temperature?: number | null
           tenant_id: string
           updated_at?: string
+          webhook_url?: string | null
           widget_auto_open?: boolean | null
           widget_auto_open_delay?: number | null
           widget_collect_email?: boolean | null
@@ -497,11 +503,13 @@ export type Database = {
           widget_welcome_message?: string | null
         }
         Update: {
+          api_key?: string | null
           confidence_threshold?: number | null
           created_at?: string
           id?: string
           max_tokens?: number | null
           max_tool_retries?: number | null
+          notification_email?: string | null
           pii_masking?: boolean | null
           prompt_injection_defense?: boolean | null
           provider_api_key?: string | null
@@ -511,6 +519,7 @@ export type Database = {
           temperature?: number | null
           tenant_id?: string
           updated_at?: string
+          webhook_url?: string | null
           widget_auto_open?: boolean | null
           widget_auto_open_delay?: number | null
           widget_collect_email?: boolean | null
@@ -724,6 +733,21 @@ export type Database = {
       is_tenant_member: {
         Args: { _tenant_id: string; _user_id: string }
         Returns: boolean
+      }
+      match_kb_chunks: {
+        Args: {
+          _match_count?: number
+          _match_threshold?: number
+          _query_embedding: string
+          _tenant_id: string
+        }
+        Returns: {
+          chunk_index: number
+          content: string
+          document_id: string
+          id: string
+          similarity: number
+        }[]
       }
     }
     Enums: {

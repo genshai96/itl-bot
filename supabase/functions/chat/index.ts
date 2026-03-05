@@ -6,6 +6,59 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ==================== PII MASKING ====================
+const PII_PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
+  { regex: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, replacement: "[PHONE]" },
+  { regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, replacement: "[EMAIL]" },
+  { regex: /\b\d{9,16}\b/g, replacement: "[CARD_NUMBER]" },
+  { regex: /\b\d{3}-\d{2}-\d{4}\b/g, replacement: "[SSN]" },
+  { regex: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, replacement: "[IP]" },
+];
+
+function maskPII(text: string): string {
+  let masked = text;
+  for (const { regex, replacement } of PII_PATTERNS) {
+    masked = masked.replace(regex, replacement);
+  }
+  return masked;
+}
+
+// ==================== PROMPT INJECTION DEFENSE ====================
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)/i,
+  /you\s+are\s+now\s+(a|an)\s+/i,
+  /forget\s+(all\s+)?(your|previous)\s+/i,
+  /system\s*:\s*/i,
+  /\[INST\]/i,
+  /\<\|im_start\|\>/i,
+  /do\s+not\s+follow\s+/i,
+  /override\s+(your|the)\s+(instructions?|rules?|guidelines?)/i,
+  /pretend\s+(you\s+are|to\s+be)/i,
+  /jailbreak/i,
+  /DAN\s+mode/i,
+];
+
+function detectPromptInjection(text: string): boolean {
+  return INJECTION_PATTERNS.some((p) => p.test(text));
+}
+
+// ==================== RATE LIMITING ====================
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 20; // 20 messages per minute per conversation
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -39,6 +92,40 @@ serve(async (req) => {
       });
     }
 
+    // Rate limiting
+    const rateLimitKey = `${tenant_id}:${conversation_id || "new"}:${end_user?.email || "anon"}`;
+    if (!checkRateLimit(rateLimitKey)) {
+      return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait a moment." }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Prompt injection defense
+    if (tenantConfig.prompt_injection_defense) {
+      if (detectPromptInjection(message)) {
+        await supabase.from("audit_logs").insert({
+          tenant_id,
+          actor_type: "system",
+          action: "prompt_injection_blocked",
+          details: { message_preview: message.substring(0, 200) },
+        });
+        return new Response(JSON.stringify({
+          conversation_id: conversation_id || null,
+          response: "Xin lỗi, tin nhắn của bạn không thể xử lý. Vui lòng thử lại với nội dung khác.",
+          blocked: true,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // PII masking
+    let processedMessage = message;
+    if (tenantConfig.pii_masking) {
+      processedMessage = maskPII(message);
+    }
+
     // 2. Get or create conversation
     let convId = conversation_id;
     if (!convId) {
@@ -62,10 +149,20 @@ serve(async (req) => {
         });
       }
       convId = conv.id;
+
+      // Webhook notification for new conversation
+      if (tenantConfig.webhook_url) {
+        dispatchWebhook(tenantConfig.webhook_url, {
+          event: "conversation.created",
+          tenant_id,
+          conversation_id: convId,
+          end_user,
+        }).catch((e) => console.warn("Webhook dispatch failed:", e));
+      }
     }
 
     // 3. Build enriched message with attachment content
-    let enrichedMessage = message || "";
+    let enrichedMessage = processedMessage || "";
     const imageAttachments: Array<{ type: string; image_url: { url: string } }> = [];
     let hasKbImportedFiles = false;
 
@@ -77,7 +174,6 @@ serve(async (req) => {
             image_url: { url: att.content },
           });
         } else if (att.strategy === "kb_imported") {
-          // File was imported to KB — RAG will handle it
           hasKbImportedFiles = true;
           if (att.content) enrichedMessage += `\n\n${att.content}`;
         } else if (att.content) {
@@ -86,7 +182,7 @@ serve(async (req) => {
       }
     }
 
-    // Save user message (text only, not base64)
+    // Save user message
     await supabase.from("messages").insert({
       conversation_id: convId,
       role: "user",
@@ -106,7 +202,7 @@ serve(async (req) => {
       return { role, content: m.content };
     });
 
-    // Replace last user message with enriched version (includes file content)
+    // Replace last user message with enriched version
     if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
       if (imageAttachments.length > 0) {
         (chatMessages[chatMessages.length - 1] as any).content = [
@@ -118,23 +214,13 @@ serve(async (req) => {
       }
     }
 
-    // 5. RAG: Search knowledge base for relevant context
+    // 5. RAG: Search knowledge base (vector + text hybrid)
     let ragContext = "";
     let ragSources: string[] = [];
     try {
-      ragContext = await searchKnowledgeBase(supabase, tenant_id, message, tenantConfig);
-      if (ragContext) {
-        // Extract document names for sources
-        const { data: docs } = await supabase
-          .from("kb_chunks")
-          .select("document_id, kb_documents!inner(name)")
-          .eq("tenant_id", tenant_id)
-          .textSearch("content", message.split(" ").slice(0, 5).join(" & "), { type: "plain" })
-          .limit(3);
-        if (docs) {
-          ragSources = [...new Set(docs.map((d: any) => d.kb_documents?.name).filter(Boolean))];
-        }
-      }
+      const ragResult = await searchKnowledgeBase(supabase, tenant_id, message, tenantConfig);
+      ragContext = ragResult.context;
+      ragSources = ragResult.sources;
     } catch (ragErr) {
       console.warn("RAG search failed, continuing without:", ragErr);
     }
@@ -152,6 +238,10 @@ serve(async (req) => {
 
     if (ragContext) {
       systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\nUse the following information to answer the user's question. Cite the source documents when relevant.\n\n${ragContext}\n--- END CONTEXT ---`;
+    }
+
+    if (hasKbImportedFiles) {
+      systemPrompt += `\n\nNote: The user has uploaded large files that were imported to the knowledge base. Use the context above to answer questions about them.`;
     }
 
     // 8. Call the tenant's configured LLM
@@ -337,8 +427,19 @@ serve(async (req) => {
         tool_used: toolUsed,
         model,
         rag_sources: ragSources,
+        pii_masked: tenantConfig.pii_masking,
       },
     });
+
+    // 12. Webhook for handoff scenarios
+    if (tenantConfig.webhook_url && botContent.includes("chuyển cho nhân viên")) {
+      dispatchWebhook(tenantConfig.webhook_url, {
+        event: "handoff.suggested",
+        tenant_id,
+        conversation_id: convId,
+        reason: "Bot suggested agent handoff",
+      }).catch((e) => console.warn("Webhook dispatch failed:", e));
+    }
 
     return new Response(JSON.stringify({
       conversation_id: convId,
@@ -359,50 +460,144 @@ serve(async (req) => {
 });
 
 /**
- * Search the knowledge base using text search (and vector search if embeddings exist)
+ * Hybrid RAG search: vector similarity + text search fallback
  */
 async function searchKnowledgeBase(
   supabase: any,
   tenantId: string,
   query: string,
   tenantConfig: any
-): Promise<string> {
-  // Try text-based search first (always works, no embeddings needed)
-  const searchTerms = query
-    .replace(/[^\w\sàáạảãăắằặẳẵâấầậẩẫèéẹẻẽêếềệểễìíịỉĩòóọỏõôốồộổỗơớờợởỡùúụủũưứừựửữỳýỵỷỹđ]/gi, "")
-    .split(/\s+/)
-    .filter((w) => w.length > 2)
-    .slice(0, 8);
+): Promise<{ context: string; sources: string[] }> {
+  let chunks: any[] = [];
+  let sources: string[] = [];
 
-  if (searchTerms.length === 0) return "";
+  // Try vector search first if embeddings are available
+  if (tenantConfig.provider_endpoint && tenantConfig.provider_api_key) {
+    try {
+      const queryEmbedding = await generateQueryEmbedding(
+        query,
+        tenantConfig.provider_endpoint,
+        tenantConfig.provider_api_key
+      );
 
-  // Full-text search on kb_chunks content
-  const { data: chunks, error } = await supabase
-    .from("kb_chunks")
-    .select("content, chunk_index, document_id")
-    .eq("tenant_id", tenantId)
-    .textSearch("content", searchTerms.join(" | "), { type: "plain" })
-    .limit(5);
+      if (queryEmbedding) {
+        const { data: vectorResults, error } = await supabase.rpc("match_kb_chunks", {
+          _tenant_id: tenantId,
+          _query_embedding: `[${queryEmbedding.join(",")}]`,
+          _match_threshold: 0.5,
+          _match_count: 5,
+        });
 
-  if (error) {
-    console.warn("Text search error:", error);
-    // Fallback: simple ILIKE search
-    const { data: fallbackChunks } = await supabase
+        if (!error && vectorResults?.length) {
+          chunks = vectorResults;
+          console.log(`Vector search found ${chunks.length} chunks`);
+        }
+      }
+    } catch (e) {
+      console.warn("Vector search failed, falling back to text:", e);
+    }
+  }
+
+  // Fallback: text-based search
+  if (chunks.length === 0) {
+    const searchTerms = query
+      .replace(/[^\w\sàáạảãăắằặẳẵâấầậẩẫèéẹẻẽêếềệểễìíịỉĩòóọỏõôốồộổỗơớờợởỡùúụủũưứừựửữỳýỵỷỹđ]/gi, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .slice(0, 8);
+
+    if (searchTerms.length === 0) return { context: "", sources: [] };
+
+    const { data: textChunks, error } = await supabase
       .from("kb_chunks")
       .select("content, chunk_index, document_id")
       .eq("tenant_id", tenantId)
-      .ilike("content", `%${searchTerms[0]}%`)
+      .textSearch("content", searchTerms.join(" | "), { type: "plain" })
       .limit(5);
 
-    if (fallbackChunks?.length) {
-      return fallbackChunks.map((c: any) => c.content).join("\n\n---\n\n");
+    if (error) {
+      const { data: fallbackChunks } = await supabase
+        .from("kb_chunks")
+        .select("content, chunk_index, document_id")
+        .eq("tenant_id", tenantId)
+        .ilike("content", `%${searchTerms[0]}%`)
+        .limit(5);
+      chunks = fallbackChunks || [];
+    } else {
+      chunks = textChunks || [];
     }
-    return "";
   }
 
-  if (chunks?.length) {
-    return chunks.map((c: any) => c.content).join("\n\n---\n\n");
+  if (chunks.length === 0) return { context: "", sources: [] };
+
+  // Get source document names
+  const docIds = [...new Set(chunks.map((c: any) => c.document_id))];
+  if (docIds.length > 0) {
+    const { data: docs } = await supabase
+      .from("kb_documents")
+      .select("id, name")
+      .in("id", docIds);
+    if (docs) {
+      sources = docs.map((d: any) => d.name);
+    }
   }
 
-  return "";
+  const context = chunks.map((c: any) => {
+    const sim = c.similarity ? ` (relevance: ${(c.similarity * 100).toFixed(0)}%)` : "";
+    return `${c.content}${sim}`;
+  }).join("\n\n---\n\n");
+
+  return { context, sources };
+}
+
+/**
+ * Generate embedding for a query
+ */
+async function generateQueryEmbedding(
+  query: string,
+  endpoint: string,
+  apiKey: string
+): Promise<number[] | null> {
+  try {
+    const baseUrl = endpoint.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+    const embeddingUrl = `${baseUrl}/embeddings`;
+
+    const response = await fetch(embeddingUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "text-embedding-3-small",
+        input: query,
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return data?.data?.[0]?.embedding || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Dispatch webhook notification
+ */
+async function dispatchWebhook(url: string, payload: any): Promise<void> {
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  } catch (e) {
+    console.warn("Webhook dispatch error:", e);
+  }
 }
