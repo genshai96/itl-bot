@@ -1,15 +1,16 @@
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AdminLayout from "@/components/layout/AdminLayout";
-import { FileText, Upload, Search, Trash2, Eye, Loader2, CheckCircle2, XCircle, File } from "lucide-react";
+import { FileText, Upload, Search, Trash2, Loader2, CheckCircle2, XCircle, File, BrainCircuit, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { useKbDocuments, useTenants } from "@/hooks/use-data";
+import { useKbDocuments, useTenants, useTenantConfig } from "@/hooks/use-data";
 import { processDocument } from "@/lib/api";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -21,6 +22,7 @@ const KnowledgeBase = () => {
   const [selectedTenant, setSelectedTenant] = useState("");
   const tenantId = selectedTenant || tenants?.[0]?.id || "";
   const { data: documents, refetch } = useKbDocuments(tenantId);
+  const { data: config } = useTenantConfig(tenantId);
   const qc = useQueryClient();
 
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -29,19 +31,15 @@ const KnowledgeBase = () => {
   const [uploadResult, setUploadResult] = useState<{ chunks: number; embeddings: boolean } | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [embeddingDocId, setEmbeddingDocId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const hasEmbeddingConfig = !!(config?.provider_endpoint && config?.provider_api_key);
   const acceptedTypes = ".txt,.md,.csv,.json,.html,.xml";
 
   const handleUpload = useCallback(async (file: File) => {
-    if (!tenantId) {
-      toast.error("Vui lòng chọn tenant trước");
-      return;
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error("File quá lớn (tối đa 20MB)");
-      return;
-    }
+    if (!tenantId) { toast.error("Vui lòng chọn tenant trước"); return; }
+    if (file.size > 20 * 1024 * 1024) { toast.error("File quá lớn (tối đa 20MB)"); return; }
 
     setUploadStep("reading");
     setUploadProgress(10);
@@ -49,50 +47,28 @@ const KnowledgeBase = () => {
     setUploadResult(null);
 
     try {
-      // 1. Read file content
       const content = await file.text();
-      if (!content.trim()) {
-        throw new Error("File rỗng");
-      }
+      if (!content.trim()) throw new Error("File rỗng");
       setUploadProgress(25);
 
-      // 2. Upload file to storage
       setUploadStep("uploading");
       const filePath = `${tenantId}/${Date.now()}-${file.name}`;
-      const { error: storageError } = await supabase.storage
-        .from("kb-documents")
-        .upload(filePath, file);
-
-      if (storageError) {
-        console.warn("Storage upload failed (non-blocking):", storageError);
-      }
+      const { error: storageError } = await supabase.storage.from("kb-documents").upload(filePath, file);
+      if (storageError) console.warn("Storage upload failed (non-blocking):", storageError);
       setUploadProgress(40);
 
-      // 3. Create document record
       const { data: doc, error: docError } = await supabase
         .from("kb_documents")
-        .insert({
-          tenant_id: tenantId,
-          name: file.name,
-          file_url: filePath,
-          status: "processing",
-        })
+        .insert({ tenant_id: tenantId, name: file.name, file_url: filePath, status: "processing" })
         .select("id")
         .single();
-
       if (docError) throw new Error(docError.message);
       setUploadProgress(50);
 
-      // 4. Call process-document edge function
       setUploadStep("chunking");
       setUploadProgress(60);
 
-      const result = await processDocument({
-        tenantId,
-        documentId: doc.id,
-        content,
-      });
-
+      const result = await processDocument({ tenantId, documentId: doc.id, content });
       setUploadProgress(100);
       setUploadStep("done");
       setUploadResult({ chunks: result.chunks_created, embeddings: result.embeddings_generated });
@@ -116,10 +92,34 @@ const KnowledgeBase = () => {
     if (error) {
       toast.error("Xóa thất bại");
     } else {
-      // Also delete chunks
       await supabase.from("kb_chunks").delete().eq("document_id", docId);
       toast.success("Đã xóa tài liệu");
       refetch();
+    }
+  };
+
+  const handleGenerateEmbeddings = async (docId?: string) => {
+    if (!hasEmbeddingConfig) {
+      toast.error("Chưa cấu hình Embedding Provider. Vào Settings → Embedding để thiết lập.");
+      return;
+    }
+    const targetId = docId || undefined;
+    setEmbeddingDocId(docId || "all");
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-embeddings", {
+        body: { tenant_id: tenantId, document_id: targetId },
+      });
+      if (error) throw error;
+      if (data?.needs_config) {
+        toast.error(data.error);
+        return;
+      }
+      toast.success(`Đã tạo embeddings cho ${data.embedded} chunks`);
+      refetch();
+    } catch (err: any) {
+      toast.error("Embedding failed: " + (err.message || ""));
+    } finally {
+      setEmbeddingDocId(null);
     }
   };
 
@@ -166,6 +166,24 @@ const KnowledgeBase = () => {
               </Select>
             )}
 
+            {/* Embedding status */}
+            {tenantId && (
+              <Button
+                size="sm"
+                variant={hasEmbeddingConfig ? "outline" : "destructive"}
+                className="gap-2 text-xs"
+                onClick={() => hasEmbeddingConfig ? handleGenerateEmbeddings() : toast.error("Cấu hình Embedding Provider trong Settings → Embedding")}
+                disabled={embeddingDocId === "all"}
+              >
+                {embeddingDocId === "all" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <BrainCircuit className="h-3.5 w-3.5" />
+                )}
+                {hasEmbeddingConfig ? "Generate All Embeddings" : "⚠️ Chưa cấu hình Embedding"}
+              </Button>
+            )}
+
             <Dialog open={uploadOpen} onOpenChange={(open) => { setUploadOpen(open); if (!open) resetUpload(); }}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-2 glow-primary">
@@ -177,8 +195,14 @@ const KnowledgeBase = () => {
                 <DialogHeader>
                   <DialogTitle>Upload tài liệu KB</DialogTitle>
                 </DialogHeader>
-
                 <div className="space-y-4 pt-2">
+                  {!hasEmbeddingConfig && (
+                    <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-xs text-warning">
+                      ⚠️ Chưa cấu hình Embedding Provider. File sẽ được chunk nhưng chưa tạo embeddings.
+                      Vào <strong>Settings → Embedding</strong> để thiết lập.
+                    </div>
+                  )}
+
                   {uploadStep === "idle" && (
                     <div
                       onClick={() => fileRef.current?.click()}
@@ -187,13 +211,7 @@ const KnowledgeBase = () => {
                       <File className="h-8 w-8 mx-auto mb-3 text-muted-foreground" />
                       <p className="text-sm font-medium">Kéo thả hoặc click để chọn file</p>
                       <p className="text-xs text-muted-foreground mt-1">Hỗ trợ: .txt, .md, .csv, .json, .html, .xml (tối đa 20MB)</p>
-                      <input
-                        ref={fileRef}
-                        type="file"
-                        accept={acceptedTypes}
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
+                      <input ref={fileRef} type="file" accept={acceptedTypes} onChange={handleFileChange} className="hidden" />
                     </div>
                   )}
 
@@ -209,20 +227,26 @@ const KnowledgeBase = () => {
                         )}
                         <span className="text-sm font-medium">{stepLabel[uploadStep]}</span>
                       </div>
-
                       <Progress value={uploadProgress} className="h-2" />
-
                       {uploadResult && (
                         <div className="rounded-lg bg-muted p-3 space-y-1">
                           <p className="text-xs"><strong>Chunks tạo:</strong> {uploadResult.chunks}</p>
-                          <p className="text-xs"><strong>Embeddings:</strong> {uploadResult.embeddings ? "✅ Đã tạo" : "⚠️ Chưa tạo (cần cấu hình provider)"}</p>
+                          <p className="text-xs">
+                            <strong>Embeddings:</strong>{" "}
+                            {uploadResult.embeddings ? "✅ Đã tạo" : (
+                              <span>
+                                ⚠️ Chưa tạo —{" "}
+                                {hasEmbeddingConfig ? (
+                                  <button className="text-primary underline" onClick={() => handleGenerateEmbeddings()}>
+                                    Generate ngay
+                                  </button>
+                                ) : "cần cấu hình Embedding Provider"}
+                              </span>
+                            )}
+                          </p>
                         </div>
                       )}
-
-                      {uploadError && (
-                        <p className="text-xs text-destructive">{uploadError}</p>
-                      )}
-
+                      {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
                       {(uploadStep === "done" || uploadStep === "error") && (
                         <Button variant="outline" size="sm" onClick={resetUpload} className="w-full">
                           Upload file khác
@@ -238,12 +262,7 @@ const KnowledgeBase = () => {
 
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Tìm tài liệu..."
-            className="pl-9 h-10"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          <Input placeholder="Tìm tài liệu..." className="pl-9 h-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
 
         {!tenantId ? (
@@ -252,9 +271,10 @@ const KnowledgeBase = () => {
           </div>
         ) : (
           <div className="rounded-lg border bg-card">
-            <div className="grid grid-cols-[1fr_100px_100px_120px_80px] gap-4 border-b px-6 py-3 text-xs font-medium text-muted-foreground">
+            <div className="grid grid-cols-[1fr_80px_100px_100px_120px_100px] gap-4 border-b px-6 py-3 text-xs font-medium text-muted-foreground">
               <span>Tên tài liệu</span>
               <span>Chunks</span>
+              <span>Embeddings</span>
               <span>Trạng thái</span>
               <span>Cập nhật</span>
               <span></span>
@@ -265,7 +285,7 @@ const KnowledgeBase = () => {
               </div>
             )}
             {filteredDocs?.map((doc) => (
-              <div key={doc.id} className="grid grid-cols-[1fr_100px_100px_120px_80px] gap-4 items-center border-b last:border-0 px-6 py-4 hover:bg-muted/30 transition-colors">
+              <div key={doc.id} className="grid grid-cols-[1fr_80px_100px_100px_120px_100px] gap-4 items-center border-b last:border-0 px-6 py-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                     <FileText className="h-4 w-4 text-primary" />
@@ -273,7 +293,27 @@ const KnowledgeBase = () => {
                   <p className="text-sm font-medium truncate">{doc.name}</p>
                 </div>
                 <span className="text-sm font-mono text-muted-foreground">{doc.chunk_count || 0}</span>
-                <span className={doc.status === "indexed" ? "badge-active" : "badge-pending"}>
+                <div>
+                  {doc.status === "indexed" ? (
+                    <Badge variant="default" className="text-[9px]">✅ Done</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px] gap-1"
+                      onClick={() => handleGenerateEmbeddings(doc.id)}
+                      disabled={embeddingDocId === doc.id || !hasEmbeddingConfig}
+                    >
+                      {embeddingDocId === doc.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3 w-3" />
+                      )}
+                      Generate
+                    </Button>
+                  )}
+                </div>
+                <span className={doc.status === "indexed" ? "text-[11px] text-success font-medium" : "text-[11px] text-warning font-medium"}>
                   {doc.status === "indexed" ? "Indexed" : doc.status === "processing" ? "Processing" : doc.status}
                 </span>
                 <span className="text-xs text-muted-foreground">

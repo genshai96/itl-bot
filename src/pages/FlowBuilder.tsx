@@ -16,23 +16,27 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, GitBranch, Trash2, Loader2, Save, Play } from "lucide-react";
+import { Plus, GitBranch, Trash2, Loader2, Save, Play, Sparkles, Copy, AlertTriangle } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useTenants } from "@/hooks/use-data";
 import { toast } from "sonner";
 import FlowCanvas from "@/components/flow/FlowCanvas";
+import { validateFlow, FLOW_TEMPLATES, type ValidationError } from "@/lib/flow-validation";
 
 const FlowBuilder = () => {
   const qc = useQueryClient();
   const { data: tenants } = useTenants();
   const [selectedTenant, setSelectedTenant] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [selectedFlow, setSelectedFlow] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [canvasConfig, setCanvasConfig] = useState<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] });
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
 
   const tenantId = selectedTenant || tenants?.[0]?.id || "";
 
@@ -65,33 +69,29 @@ const FlowBuilder = () => {
   });
 
   const createFlow = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (templateConfig?: any) => {
       const { data, error } = await supabase
         .from("flow_definitions")
         .insert({ tenant_id: tenantId, name: newName, description: newDesc || null })
         .select()
         .single();
       if (error) throw error;
-      const defaultConfig = {
+      const defaultConfig = templateConfig || {
         nodes: [{
-          id: "start",
-          type: "trigger",
-          position: { x: 300, y: 50 },
+          id: "start", type: "trigger", position: { x: 300, y: 50 },
           data: { label: "Conversation Start", type: "trigger", intent: "any" },
         }],
         edges: [],
       };
       await supabase.from("flow_versions").insert({
-        flow_id: data.id,
-        version: 1,
-        config: defaultConfig,
-        status: "draft",
+        flow_id: data.id, version: 1, config: defaultConfig, status: "draft",
       });
       return data;
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["flow_definitions"] });
       setCreateOpen(false);
+      setTemplateOpen(false);
       setNewName("");
       setNewDesc("");
       setSelectedFlow(data.id);
@@ -125,24 +125,38 @@ const FlowBuilder = () => {
   const saveVersion = useMutation({
     mutationFn: async () => {
       if (!selectedFlow) return;
+      // Validate before saving
+      const errors = validateFlow(canvasConfig.nodes || [], canvasConfig.edges || []);
+      const criticalErrors = errors.filter((e) => e.type === "error");
+      if (criticalErrors.length > 0) {
+        throw new Error(`Flow có ${criticalErrors.length} lỗi cần sửa trước khi lưu:\n${criticalErrors.map((e) => "• " + e.message).join("\n")}`);
+      }
+
       const currentVersion = versions?.[0]?.version || 0;
       const { error } = await supabase.from("flow_versions").insert({
-        flow_id: selectedFlow,
-        version: currentVersion + 1,
-        config: canvasConfig,
-        status: "draft",
+        flow_id: selectedFlow, version: currentVersion + 1, config: canvasConfig, status: "draft",
       });
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow_versions"] });
-      toast.success("Version mới đã lưu");
+      toast.success("Version mới đã lưu ✅");
     },
     onError: (e: any) => toast.error(e.message),
   });
 
   const publishVersion = useMutation({
     mutationFn: async (versionId: string) => {
+      // Find version config and validate
+      const version = versions?.find((v) => v.id === versionId);
+      if (version) {
+        const config = version.config as any;
+        const errors = validateFlow(config?.nodes || [], config?.edges || []);
+        const criticalErrors = errors.filter((e) => e.type === "error");
+        if (criticalErrors.length > 0) {
+          throw new Error(`Không thể publish: ${criticalErrors.length} lỗi\n${criticalErrors.map((e) => "• " + e.message).join("\n")}`);
+        }
+      }
       const { error } = await supabase
         .from("flow_versions")
         .update({ status: "published", published_at: new Date().toISOString() })
@@ -151,24 +165,47 @@ const FlowBuilder = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow_versions"] });
-      toast.success("Đã publish version");
+      toast.success("Đã publish version ✅");
     },
+    onError: (e: any) => toast.error(e.message),
   });
+
+  const generateFlowWithAI = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-flow", {
+        body: { prompt: aiPrompt, tenant_id: tenantId },
+      });
+      if (error) throw error;
+      if (data?.config) {
+        setCanvasConfig(data.config);
+        setNewName(data.name || "AI Generated Flow");
+        setNewDesc(data.description || aiPrompt);
+        toast.success("AI đã tạo flow! Bấm 'Tạo' để lưu");
+      }
+    } catch (err: any) {
+      toast.error("AI generation failed: " + (err.message || ""));
+    } finally {
+      setAiGenerating(false);
+    }
+  };
 
   const handleConfigChange = useCallback((config: { nodes: any[]; edges: any[] }) => {
     setCanvasConfig(config);
   }, []);
 
   const loadVersion = useCallback((config: any) => {
-    setCanvasConfig({
-      nodes: config?.nodes || [],
-      edges: config?.edges || [],
-    });
+    setCanvasConfig({ nodes: config?.nodes || [], edges: config?.edges || [] });
   }, []);
 
-  const selectedFlowData = flows?.find((f) => f.id === selectedFlow);
+  const applyTemplate = (template: typeof FLOW_TEMPLATES[0]) => {
+    setNewName(template.name);
+    setNewDesc(template.description);
+    createFlow.mutate(template.config);
+  };
 
-  // Auto-load latest version when selecting a flow
+  const selectedFlowData = flows?.find((f) => f.id === selectedFlow);
   const latestVersionConfig = versions?.[0]?.config as any;
 
   return (
@@ -179,7 +216,7 @@ const FlowBuilder = () => {
           <div className="flex items-center gap-4">
             <div>
               <h1 className="text-lg font-bold tracking-tight">Flow Builder</h1>
-              <p className="text-[11px] text-muted-foreground">Drag-drop visual editor</p>
+              <p className="text-[11px] text-muted-foreground">Drag-drop visual editor với validation</p>
             </div>
             {tenants && tenants.length > 1 && (
               <Select value={tenantId} onValueChange={setSelectedTenant}>
@@ -206,6 +243,38 @@ const FlowBuilder = () => {
                 </Button>
               </>
             )}
+
+            {/* Templates button */}
+            <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs">
+                  <Copy className="h-3.5 w-3.5" />
+                  Templates
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader><DialogTitle>Flow Templates</DialogTitle></DialogHeader>
+                <div className="space-y-3 py-2">
+                  {FLOW_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      onClick={() => applyTemplate(tpl)}
+                      className="w-full text-left rounded-lg border p-4 hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                    >
+                      <h4 className="text-sm font-semibold">{tpl.name}</h4>
+                      <p className="text-xs text-muted-foreground mt-1">{tpl.description}</p>
+                      <div className="flex gap-1 mt-2">
+                        {Array.from(new Set((tpl.config.nodes || []).map((n: any) => n.type))).map((type) => (
+                          <Badge key={type as string} variant="secondary" className="text-[9px]">{type as string}</Badge>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* New Flow */}
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5 h-8 glow-primary">
@@ -213,7 +282,7 @@ const FlowBuilder = () => {
                   New Flow
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-md">
                 <DialogHeader><DialogTitle>Tạo Flow mới</DialogTitle></DialogHeader>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
@@ -222,9 +291,35 @@ const FlowBuilder = () => {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs">Mô tả</Label>
-                    <Textarea value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Mô tả flow..." rows={3} />
+                    <Textarea value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Mô tả flow..." rows={2} />
                   </div>
-                  <Button onClick={() => createFlow.mutate()} disabled={!newName.trim() || createFlow.isPending} className="w-full gap-2">
+
+                  {/* AI Generation */}
+                  <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <span className="text-xs font-semibold text-primary">AI Generate Flow</span>
+                    </div>
+                    <Textarea
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      placeholder="VD: Tạo flow hỗ trợ khách hàng tra cứu đơn hàng, nếu không tìm thấy thì chuyển agent..."
+                      rows={3}
+                      className="text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full gap-2 text-xs"
+                      onClick={generateFlowWithAI}
+                      disabled={aiGenerating || !aiPrompt.trim()}
+                    >
+                      {aiGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {aiGenerating ? "Đang tạo..." : "Tạo bằng AI"}
+                    </Button>
+                  </div>
+
+                  <Button onClick={() => createFlow.mutate(canvasConfig.nodes.length > 0 ? canvasConfig : undefined)} disabled={!newName.trim() || createFlow.isPending} className="w-full gap-2">
                     {createFlow.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     Tạo
                   </Button>
@@ -253,9 +348,7 @@ const FlowBuilder = () => {
               {flows?.map((flow) => (
                 <button
                   key={flow.id}
-                  onClick={() => {
-                    setSelectedFlow(flow.id);
-                  }}
+                  onClick={() => setSelectedFlow(flow.id)}
                   className={`w-full text-left px-3 py-2.5 transition-colors border-b ${
                     selectedFlow === flow.id ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/50"
                   }`}
