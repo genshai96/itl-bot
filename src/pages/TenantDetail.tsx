@@ -311,6 +311,11 @@ const TenantDetail = () => {
           });
         },
       });
+    } catch (err: any) {
+      setTestMessages((prev) => [...prev, { role: "bot", content: `❌ Lỗi: ${err.message || "Unknown error"}` }]);
+    } finally {
+      setTestSending(false);
+    }
   };
 
   if (loadingTenant || loadingConfig) {
