@@ -1,13 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
-import { Search, Send, Bot, User, ArrowUpRight } from "lucide-react";
+import { Search, Send, Bot, User, ArrowUpRight, Tag, X, Plus, Filter } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useConversations, useMessages } from "@/hooks/use-data";
 import { useRealtimeConversations, useRealtimeMessages } from "@/hooks/use-realtime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { format, isAfter, subDays } from "date-fns";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 const statusColors: Record<string, string> = {
   active: "bg-success",
@@ -16,32 +19,89 @@ const statusColors: Record<string, string> = {
 };
 
 const Conversations = () => {
+  const qc = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [inputMsg, setInputMsg] = useState("");
-  const [filter, setFilter] = useState<"all" | "active" | "handoff">("all");
+  const [filter, setFilter] = useState<"all" | "active" | "handoff" | "resolved">("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [dateFilter, setDateFilter] = useState<string>("all");
   const [sending, setSending] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations } = useConversations();
   const { data: messages, refetch: refetchMessages } = useMessages(selectedConvId || "");
 
-  // Enable realtime
   useRealtimeConversations();
   useRealtimeMessages(selectedConvId || undefined);
 
-  // Auto-select first
+  // Labels for selected conversation
+  const { data: labels, refetch: refetchLabels } = useQuery({
+    queryKey: ["conversation_labels", selectedConvId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("conversation_labels")
+        .select("*")
+        .eq("conversation_id", selectedConvId!)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!selectedConvId,
+  });
+
+  const addLabel = useMutation({
+    mutationFn: async (label: string) => {
+      const { error } = await supabase.from("conversation_labels").insert({
+        conversation_id: selectedConvId!,
+        label,
+        auto_labeled: false,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => { refetchLabels(); setNewLabel(""); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const removeLabel = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("conversation_labels").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => refetchLabels(),
+  });
+
   useEffect(() => {
     if (conversations?.length && !selectedConvId) {
       setSelectedConvId(conversations[0].id);
     }
   }, [conversations, selectedConvId]);
 
-  // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const filtered = conversations?.filter((c) => filter === "all" || c.status === filter) || [];
+  // Filtered conversations
+  const filtered = useMemo(() => {
+    let list = conversations || [];
+    if (filter !== "all") list = list.filter((c) => c.status === filter);
+    if (searchTerm) {
+      const s = searchTerm.toLowerCase();
+      list = list.filter((c) =>
+        (c.end_user_name || "").toLowerCase().includes(s) ||
+        (c.end_user_email || "").toLowerCase().includes(s) ||
+        (c.intent || "").toLowerCase().includes(s) ||
+        c.id.includes(s)
+      );
+    }
+    if (dateFilter !== "all") {
+      const days = parseInt(dateFilter);
+      const cutoff = subDays(new Date(), days);
+      list = list.filter((c) => isAfter(new Date(c.created_at), cutoff));
+    }
+    return list;
+  }, [conversations, filter, searchTerm, dateFilter]);
+
   const selectedConv = conversations?.find((c) => c.id === selectedConvId);
 
   const sendManualReply = async () => {
@@ -78,6 +138,12 @@ const Conversations = () => {
     }
   };
 
+  const resolveConversation = async () => {
+    if (!selectedConvId) return;
+    const { error } = await supabase.from("conversations").update({ status: "resolved" }).eq("id", selectedConvId);
+    if (!error) toast.success("Đã đánh dấu resolved");
+  };
+
   return (
     <AdminLayout>
       <div className="flex h-[calc(100vh-4rem)] -m-8 animate-slide-in">
@@ -87,15 +153,33 @@ const Conversations = () => {
             <h2 className="text-base font-semibold">Hội thoại</h2>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Tìm kiếm..." className="pl-9 h-9 text-sm" />
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Tìm theo tên, email, intent..."
+                className="pl-9 h-9 text-sm"
+              />
             </div>
-            <div className="flex gap-1.5">
-              {([["all", "Tất cả"], ["active", "Đang xử lý"], ["handoff", "Handoff"]] as const).map(([key, label]) => (
+            <div className="flex gap-1.5 flex-wrap">
+              {([["all", "Tất cả"], ["active", "Đang xử lý"], ["handoff", "Handoff"], ["resolved", "Resolved"]] as const).map(([key, label]) => (
                 <button
                   key={key}
                   onClick={() => setFilter(key)}
                   className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
                     filter === key ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground hover:bg-primary/5"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              {([["all", "Mọi lúc"], ["1", "Hôm nay"], ["7", "7 ngày"], ["30", "30 ngày"]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setDateFilter(key)}
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                    dateFilter === key ? "bg-info/10 text-info" : "bg-muted text-muted-foreground hover:bg-info/5"
                   }`}
                 >
                   {label}
@@ -156,11 +240,53 @@ const Conversations = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {selectedConv.status !== "resolved" && (
+                    <Button variant="outline" size="sm" className="text-xs" onClick={resolveConversation}>
+                      Resolve
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleHandoff}>
                     <ArrowUpRight className="h-3.5 w-3.5" />
                     Handoff
                   </Button>
                 </div>
+              </div>
+
+              {/* Labels bar */}
+              <div className="flex items-center gap-2 px-6 py-2 bg-muted/30 border-b flex-wrap">
+                <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                {labels?.map((l) => (
+                  <Badge key={l.id} variant="secondary" className="text-[10px] gap-1 pr-1">
+                    {l.label}
+                    {!l.auto_labeled && (
+                      <button onClick={() => removeLabel.mutate(l.id)} className="hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </Badge>
+                ))}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors">
+                      <Plus className="h-3 w-3" />
+                      Label
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48 p-2">
+                    <div className="flex gap-1">
+                      <Input
+                        value={newLabel}
+                        onChange={(e) => setNewLabel(e.target.value)}
+                        placeholder="Tên label..."
+                        className="h-7 text-xs"
+                        onKeyDown={(e) => e.key === "Enter" && newLabel.trim() && addLabel.mutate(newLabel.trim())}
+                      />
+                      <Button size="sm" className="h-7 px-2" onClick={() => newLabel.trim() && addLabel.mutate(newLabel.trim())}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
