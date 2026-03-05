@@ -261,8 +261,8 @@ C -- No --> E[Result B]
 col1,col2,col3
 data1,data2,data3
 \`\`\`
-Supported extensions: .csv, .txt, .json, .xml, .html, .md
-When user asks for Excel, generate a .csv file instead (compatible with Excel).
+Supported extensions: .csv, .txt, .json, .xml, .html, .md, .xlsx
+When user asks for Excel/spreadsheet, generate a .csv file (the system auto-converts to real .xlsx with formatting).
 
 Use these formats when appropriate. For diagrams/flowcharts, always prefer mermaid over text descriptions.
 --- END FORMATTING ---`;
