@@ -75,9 +75,9 @@ export async function sendChatMessageStream({
   onError: (err: Error) => void;
 }) {
   try {
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    const url = `https://${projectId}.supabase.co/functions/v1/chat-stream`;
+    const url = `${supabaseUrl}/functions/v1/chat-stream`;
 
     const response = await fetch(url, {
       method: "POST",
