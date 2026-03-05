@@ -31,8 +31,10 @@ import {
 } from "@/components/ui/sheet";
 import {
   MessageSquare, Bot, ArrowUpRight, Zap, GitBranch, Wrench,
-  Plus, Trash2, Settings2, Play,
+  Plus, Trash2, Settings2, Play, AlertTriangle, CheckCircle2, XCircle,
 } from "lucide-react";
+import { validateFlow, type ValidationError } from "@/lib/flow-validation";
+import { toast } from "sonner";
 
 // ===================== CUSTOM NODE TYPES =====================
 
@@ -97,6 +99,10 @@ function ConditionNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
       </div>
       <p className="text-xs font-medium truncate">{data.label}</p>
       {data.condition && <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">{data.condition}</p>}
+      <div className="flex justify-between mt-2 px-2">
+        <span className="text-[8px] font-bold text-success">YES</span>
+        <span className="text-[8px] font-bold text-destructive">NO</span>
+      </div>
       <Handle type="source" position={Position.Bottom} id="yes" className="!bg-success !w-3 !h-3 !border-2 !border-card !left-[30%]" />
       <Handle type="source" position={Position.Bottom} id="no" className="!bg-destructive !w-3 !h-3 !border-2 !border-card !left-[70%]" />
     </div>
@@ -184,12 +190,15 @@ const NODE_PALETTE = [
 interface FlowCanvasProps {
   initialConfig: { nodes?: any[]; edges?: any[] };
   onConfigChange: (config: { nodes: any[]; edges: any[] }) => void;
+  onValidate?: (errors: ValidationError[]) => void;
 }
 
-export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvasProps) {
+export default function FlowCanvas({ initialConfig, onConfigChange, onValidate }: FlowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [selectedNode, setSelectedNode] = useState<Node<FlowNodeData> | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [showValidation, setShowValidation] = useState(false);
 
   const initialNodes: Node<FlowNodeData>[] = useMemo(() => {
     if (initialConfig.nodes?.length) {
@@ -227,12 +236,28 @@ export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvas
     }, eds));
   }, [setEdges]);
 
-  // Sync to parent on changes
   const syncConfig = useCallback(() => {
     const cleanNodes = nodes.map(({ id, type, position, data }) => ({ id, type, position, data }));
     const cleanEdges = edges.map(({ id, source, target, sourceHandle, targetHandle }) => ({ id, source, target, sourceHandle, targetHandle }));
     onConfigChange({ nodes: cleanNodes, edges: cleanEdges });
   }, [nodes, edges, onConfigChange]);
+
+  const runValidation = useCallback(() => {
+    const errors = validateFlow(nodes, edges);
+    setValidationErrors(errors);
+    setShowValidation(true);
+    onValidate?.(errors);
+
+    const errorCount = errors.filter((e) => e.type === "error").length;
+    const warnCount = errors.filter((e) => e.type === "warning").length;
+
+    if (errorCount === 0 && warnCount === 0) {
+      toast.success("Flow hợp lệ! ✅");
+    } else {
+      toast.error(`${errorCount} lỗi, ${warnCount} cảnh báo`);
+    }
+    return errors;
+  }, [nodes, edges, onValidate]);
 
   const addNode = useCallback((type: string) => {
     const id = `${type}-${Date.now()}`;
@@ -280,6 +305,9 @@ export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvas
     setSheetOpen(false);
   }, [selectedNode, setNodes, setEdges]);
 
+  // Highlight error nodes
+  const errorNodeIds = new Set(validationErrors.filter((e) => e.nodeId).map((e) => e.nodeId));
+
   return (
     <div ref={reactFlowWrapper} className="w-full h-full relative">
       <ReactFlow
@@ -308,6 +336,7 @@ export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvas
         <MiniMap
           className="!bg-card !border-border"
           nodeColor={(n) => {
+            if (errorNodeIds.has(n.id)) return "hsl(0, 72%, 51%)";
             switch (n.type) {
               case "trigger": return "hsl(210, 92%, 55%)";
               case "message": return "hsl(173, 58%, 39%)";
@@ -339,13 +368,61 @@ export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvas
           </div>
         </Panel>
 
-        {/* Save button */}
+        {/* Top right: Validate + Apply */}
         <Panel position="top-right" className="!m-3">
-          <Button size="sm" className="gap-2 shadow-lg" onClick={syncConfig}>
-            <Play className="h-3.5 w-3.5" />
-            Apply Changes
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="gap-2 shadow-lg" onClick={runValidation}>
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Validate
+            </Button>
+            <Button size="sm" className="gap-2 shadow-lg" onClick={syncConfig}>
+              <Play className="h-3.5 w-3.5" />
+              Apply
+            </Button>
+          </div>
         </Panel>
+
+        {/* Validation results panel */}
+        {showValidation && validationErrors.length > 0 && (
+          <Panel position="bottom-left" className="!m-3">
+            <div className="rounded-xl border bg-card shadow-xl p-3 max-w-xs max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Validation</p>
+                <button onClick={() => setShowValidation(false)} className="text-muted-foreground hover:text-foreground">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {validationErrors.map((err, i) => (
+                  <div key={i} className={`flex items-start gap-2 text-[11px] ${
+                    err.type === "error" ? "text-destructive" : "text-warning"
+                  }`}>
+                    {err.type === "error" ? (
+                      <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                    )}
+                    <span>{err.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Panel>
+        )}
+
+        {showValidation && validationErrors.length === 0 && (
+          <Panel position="bottom-left" className="!m-3">
+            <div className="rounded-xl border bg-card shadow-xl p-3 max-w-xs">
+              <div className="flex items-center gap-2 text-success text-xs">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="font-medium">Flow hợp lệ!</span>
+                <button onClick={() => setShowValidation(false)} className="ml-auto text-muted-foreground hover:text-foreground">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </Panel>
+        )}
       </ReactFlow>
 
       {/* Node properties sheet */}
@@ -408,6 +485,9 @@ export default function FlowCanvas({ initialConfig, onConfigChange }: FlowCanvas
                     className="h-9 text-sm font-mono"
                     placeholder="confidence > 0.7"
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    Condition node cần 2 output: kéo từ handle <span className="text-success font-bold">xanh (Yes)</span> và <span className="text-destructive font-bold">đỏ (No)</span>
+                  </p>
                 </div>
               )}
 
