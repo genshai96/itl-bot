@@ -23,7 +23,7 @@ const navItems = [
   { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle },
   { to: "/knowledge", label: "Knowledge Base", icon: FileText },
   { to: "/flows", label: "Flow Builder", icon: GitBranch },
-  { to: "/agents", label: "Agents", icon: Users },
+  { to: "/agents", label: "Operators", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/audit-logs", label: "Audit Logs", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
