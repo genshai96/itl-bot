@@ -231,7 +231,7 @@ const TenantDetail = () => {
           widget_collect_role: widgetConfig.collectRole,
           widget_role_options: widgetConfig.roleOptionsText
             .split(",")
-            .map((x) => x.trim())
+            .map((x: string) => x.trim())
             .filter(Boolean),
           widget_show_powered_by: widgetConfig.showPoweredBy,
           widget_auto_open: widgetConfig.autoOpen,

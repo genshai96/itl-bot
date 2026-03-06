@@ -156,7 +156,7 @@ serve(async (req) => {
 
     const validation = validateBootstrapPayload(normalized);
     if (!validation.ok) {
-      return new Response(JSON.stringify({ ok: false, ...validation }), {
+      return new Response(JSON.stringify({ ...validation, ok: false }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -233,7 +233,7 @@ serve(async (req) => {
           .eq("id", runId);
       }
 
-      return new Response(JSON.stringify({ ok: true, ...validation, plan }), {
+      return new Response(JSON.stringify({ ...validation, ok: true, plan }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

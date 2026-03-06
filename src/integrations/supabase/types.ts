@@ -588,9 +588,11 @@ export type Database = {
           widget_collect_email: boolean | null
           widget_collect_name: boolean | null
           widget_collect_phone: boolean | null
+          widget_collect_role: boolean | null
           widget_placeholder: string | null
           widget_position: string | null
           widget_primary_color: string | null
+          widget_role_options: Json | null
           widget_show_powered_by: boolean | null
           widget_subtitle: string | null
           widget_title: string | null
@@ -621,9 +623,11 @@ export type Database = {
           widget_collect_email?: boolean | null
           widget_collect_name?: boolean | null
           widget_collect_phone?: boolean | null
+          widget_collect_role?: boolean | null
           widget_placeholder?: string | null
           widget_position?: string | null
           widget_primary_color?: string | null
+          widget_role_options?: Json | null
           widget_show_powered_by?: boolean | null
           widget_subtitle?: string | null
           widget_title?: string | null
@@ -654,9 +658,11 @@ export type Database = {
           widget_collect_email?: boolean | null
           widget_collect_name?: boolean | null
           widget_collect_phone?: boolean | null
+          widget_collect_role?: boolean | null
           widget_placeholder?: string | null
           widget_position?: string | null
           widget_primary_color?: string | null
+          widget_role_options?: Json | null
           widget_show_powered_by?: boolean | null
           widget_subtitle?: string | null
           widget_title?: string | null

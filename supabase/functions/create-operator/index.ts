@@ -26,7 +26,7 @@ async function verifyAdmin(req: Request) {
     .select("role, tenant_id")
     .eq("user_id", caller.id);
 
-  const isSystemAdmin = callerRoles?.some((r: any) => r.role === "system_admin");
+  const isSystemAdmin = callerRoles?.some((r: any) => r.role === "system_admin") ?? false;
   const adminTenantIds = callerRoles
     ?.filter((r: any) => r.role === "tenant_admin")
     .map((r: any) => r.tenant_id) || [];

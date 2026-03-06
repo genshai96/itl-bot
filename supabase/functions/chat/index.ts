@@ -576,7 +576,7 @@ async function callLLM(
     toolUsed = toolCall.function.name;
     const toolStart = Date.now();
     const toolDef = runtimeTools.find(t => t.tool_id === toolUsed);
-    if (toolDef && (!supabaseClient || !tenantId || await canInvokeTool(supabaseClient, tenantId, toolUsed))) {
+    if (toolDef && (!supabaseClient || !tenantId || !toolUsed || await canInvokeTool(supabaseClient, tenantId, toolUsed))) {
       try {
         const invoke = supabaseClient && tenantId
           ? await invokeToolWithMcpGovernance(
@@ -1030,14 +1030,14 @@ async function recallMemoryContextV2(
   });
 
   const top = scored
-    .sort((a, b) => b.total - a.total)
+    .sort((a: { item: any; total: number }, b: { item: any; total: number }) => b.total - a.total)
     .slice(0, 8)
-    .filter((entry) => entry.total > 0.12);
+    .filter((entry: { item: any; total: number }) => entry.total > 0.12);
 
   if (!top.length) return "";
 
   await supabase.from("memory_access_logs").insert(
-    top.map(({ item, total }) => ({
+    top.map(({ item, total }: { item: any; total: number }) => ({
       tenant_id: tenantId,
       conversation_id: conversationId,
       user_ref: userRef,
