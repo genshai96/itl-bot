@@ -1,5 +1,6 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
+import { useHighestRole } from "@/hooks/use-current-roles";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import {
   LayoutDashboard,
@@ -14,30 +15,43 @@ import {
   LogOut,
   GitBranch,
   ScrollText,
+  Headset,
 } from "lucide-react";
 
-const navItems = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/tenants", label: "Tenants", icon: Building2 },
-  { to: "/conversations", label: "Conversations", icon: MessageSquare },
-  { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle },
-  { to: "/knowledge", label: "Knowledge Base", icon: FileText },
-  { to: "/flows", label: "Flow Builder", icon: GitBranch },
-  { to: "/agents", label: "Operators", icon: Users },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/audit-logs", label: "Audit Logs", icon: ScrollText },
-  { to: "/settings", label: "Settings", icon: Settings },
+const allNavItems = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, minRole: "support_lead" as const },
+  { to: "/tenants", label: "Tenants", icon: Building2, minRole: "tenant_admin" as const },
+  { to: "/conversations", label: "Conversations", icon: MessageSquare, minRole: "support_agent" as const },
+  { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle, minRole: "support_agent" as const },
+  { to: "/knowledge", label: "Knowledge Base", icon: FileText, minRole: "support_lead" as const },
+  { to: "/flows", label: "Flow Builder", icon: GitBranch, minRole: "tenant_admin" as const },
+  { to: "/agents", label: "Operators", icon: Users, minRole: "support_lead" as const },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, minRole: "support_lead" as const },
+  { to: "/audit-logs", label: "Audit Logs", icon: ScrollText, minRole: "tenant_admin" as const },
+  { to: "/settings", label: "Settings", icon: Settings, minRole: "tenant_admin" as const },
 ];
+
+const rolePriority: Record<string, number> = {
+  system_admin: 0,
+  tenant_admin: 1,
+  support_lead: 2,
+  support_agent: 3,
+  end_user: 4,
+};
 
 export const AppSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const highestRole = useHighestRole();
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/login");
   };
+
+  const userLevel = highestRole ? rolePriority[highestRole] ?? 4 : 4;
+  const navItems = allNavItems.filter((item) => userLevel <= rolePriority[item.minRole]);
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar flex flex-col"
@@ -53,6 +67,18 @@ export const AppSidebar = () => {
         </div>
         <NotificationBell />
       </div>
+
+      {/* Role badge */}
+      {highestRole && (
+        <div className="px-6 py-2 border-b border-sidebar-border">
+          <span className="text-[10px] font-medium px-2 py-1 rounded-full bg-primary/10 text-primary">
+            {highestRole === "system_admin" ? "System Admin" :
+             highestRole === "tenant_admin" ? "Tenant Admin" :
+             highestRole === "support_lead" ? "Support Lead" :
+             highestRole === "support_agent" ? "Operator" : "User"}
+          </span>
+        </div>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
