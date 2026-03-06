@@ -44,8 +44,8 @@ function detectPromptInjection(text: string): boolean {
 
 // ==================== RATE LIMITING ====================
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX = 20; // 20 messages per minute per conversation
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 20;
 
 function checkRateLimit(key: string): boolean {
   const now = Date.now();
@@ -59,6 +59,532 @@ function checkRateLimit(key: string): boolean {
   return true;
 }
 
+// ==================== FLOW EXECUTION ENGINE ====================
+interface FlowNode {
+  id: string;
+  type: string;
+  data: Record<string, any>;
+  position: { x: number; y: number };
+}
+
+interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+}
+
+interface FlowState {
+  flow_id: string;
+  flow_version_id: string;
+  current_node_id: string;
+  context: Record<string, any>;  // variables passed between nodes
+  step_count: number;
+}
+
+interface FlowExecutionResult {
+  response: string;
+  handoff?: { priority: string; reason: string };
+  tool_used?: string;
+  tool_latency_ms?: number;
+  new_state: FlowState | null;  // null = flow ended
+  sources?: string[];
+}
+
+/**
+ * Load the active published flow for a tenant
+ */
+async function loadActiveFlow(supabase: any, tenantId: string): Promise<{
+  flowId: string;
+  versionId: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+} | null> {
+  // Find active flow definition
+  const { data: flows } = await supabase
+    .from("flow_definitions")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("is_active", true)
+    .limit(1);
+
+  if (!flows?.length) return null;
+
+  const flowId = flows[0].id;
+
+  // Get latest published version
+  const { data: versions } = await supabase
+    .from("flow_versions")
+    .select("id, config")
+    .eq("flow_id", flowId)
+    .eq("status", "published")
+    .order("version", { ascending: false })
+    .limit(1);
+
+  if (!versions?.length) return null;
+
+  const config = versions[0].config as any;
+  if (!config?.nodes?.length) return null;
+
+  return {
+    flowId,
+    versionId: versions[0].id,
+    nodes: config.nodes,
+    edges: config.edges || [],
+  };
+}
+
+/**
+ * Get outgoing edges from a node, optionally filtered by sourceHandle
+ */
+function getOutgoingEdges(edges: FlowEdge[], nodeId: string, handle?: string): FlowEdge[] {
+  return edges.filter(e => e.source === nodeId && (!handle || e.sourceHandle === handle));
+}
+
+/**
+ * Find the next node by following an edge
+ */
+function getNextNode(nodes: FlowNode[], edges: FlowEdge[], currentNodeId: string, handle?: string): FlowNode | null {
+  const outEdges = getOutgoingEdges(edges, currentNodeId, handle);
+  if (!outEdges.length) return null;
+  return nodes.find(n => n.id === outEdges[0].target) || null;
+}
+
+/**
+ * Execute a flow from the current state, processing the user's message
+ * Returns after hitting a node that produces a response (message, botResponse, handoff)
+ * or when the flow ends
+ */
+async function executeFlow(
+  supabase: any,
+  flow: { flowId: string; versionId: string; nodes: FlowNode[]; edges: FlowEdge[] },
+  state: FlowState | null,
+  userMessage: string,
+  convId: string,
+  tenantConfig: any,
+  chatMessages: Array<{ role: string; content: string }>,
+  enabledTools: any[] | null,
+  ragContext: string,
+  ragSources: string[],
+): Promise<FlowExecutionResult> {
+  const { nodes, edges, flowId, versionId } = flow;
+  const MAX_STEPS = 15; // prevent infinite loops
+
+  // Initialize state: find trigger node
+  let currentState: FlowState = state || {
+    flow_id: flowId,
+    flow_version_id: versionId,
+    current_node_id: "",
+    context: {},
+    step_count: 0,
+  };
+
+  // If no current node, start from trigger
+  let currentNode: FlowNode | null = null;
+  if (!currentState.current_node_id) {
+    // Find matching trigger
+    const triggers = nodes.filter(n => n.type === "trigger");
+    // Try intent-specific trigger first
+    const intentTrigger = triggers.find(t => 
+      t.data?.intent && t.data.intent !== "any" && 
+      userMessage.toLowerCase().includes(t.data.intent.toLowerCase())
+    );
+    currentNode = intentTrigger || triggers[0] || null;
+    if (!currentNode) {
+      return { response: "", new_state: null, sources: ragSources };
+    }
+    currentState.current_node_id = currentNode.id;
+    // Advance past trigger to the next node
+    const nextAfterTrigger = getNextNode(nodes, edges, currentNode.id);
+    if (nextAfterTrigger) {
+      currentNode = nextAfterTrigger;
+      currentState.current_node_id = currentNode.id;
+    }
+  } else {
+    // Resume from saved node
+    currentNode = nodes.find(n => n.id === currentState.current_node_id) || null;
+    if (!currentNode) {
+      return { response: "", new_state: null, sources: ragSources };
+    }
+    // We're at a node that was waiting for user input. Advance to next.
+    const next = getNextNode(nodes, edges, currentNode.id);
+    if (next) {
+      currentNode = next;
+      currentState.current_node_id = currentNode.id;
+    }
+  }
+
+  // Walk the flow graph
+  let stepCount = 0;
+  while (currentNode && stepCount < MAX_STEPS) {
+    stepCount++;
+    currentState.step_count++;
+    currentState.current_node_id = currentNode.id;
+
+    switch (currentNode.type) {
+      case "trigger": {
+        // Already handled above, just advance
+        const next = getNextNode(nodes, edges, currentNode.id);
+        currentNode = next;
+        continue;
+      }
+
+      case "message": {
+        // Static message - send it and advance to next, but WAIT for user reply
+        const msg = currentNode.data?.message || "...";
+        // Check if there's a next node — if so, save state to continue on next user message
+        const next = getNextNode(nodes, edges, currentNode.id);
+        const newState: FlowState | null = next ? {
+          ...currentState,
+          current_node_id: currentNode.id, // stay here, advance on next message
+        } : null;
+        return { response: msg, new_state: newState, sources: ragSources };
+      }
+
+      case "botResponse": {
+        // Call LLM with flow context
+        const nodePrompt = currentNode.data?.message || "";
+        const flowSystemAddition = nodePrompt
+          ? `\n\n--- FLOW INSTRUCTION ---\n${nodePrompt}\nUse conversation context and knowledge base to respond.\n--- END FLOW INSTRUCTION ---`
+          : "";
+
+        const llmResult = await callLLM(
+          tenantConfig,
+          chatMessages,
+          ragContext,
+          ragSources,
+          flowSystemAddition,
+          enabledTools,
+        );
+
+        // Advance
+        const next = getNextNode(nodes, edges, currentNode.id);
+        const newState: FlowState | null = next ? {
+          ...currentState,
+          current_node_id: currentNode.id,
+          context: { ...currentState.context, last_bot_response: llmResult.content },
+        } : null;
+
+        return {
+          response: llmResult.content,
+          tool_used: llmResult.tool_used,
+          tool_latency_ms: llmResult.tool_latency_ms,
+          new_state: newState,
+          sources: ragSources,
+        };
+      }
+
+      case "condition": {
+        // Use LLM to evaluate condition based on conversation
+        const conditionExpr = currentNode.data?.condition || "";
+        const evaluation = await evaluateCondition(
+          tenantConfig,
+          chatMessages,
+          conditionExpr,
+          currentState.context,
+        );
+
+        const handle = evaluation ? "yes" : "no";
+        const next = getNextNode(nodes, edges, currentNode.id, handle);
+        currentNode = next;
+        continue;
+      }
+
+      case "tool": {
+        // Execute a tool
+        const toolId = currentNode.data?.toolId || "";
+        const toolDef = enabledTools?.find(t => t.tool_id === toolId);
+        
+        if (toolDef) {
+          const toolStart = Date.now();
+          try {
+            const toolResponse = await fetch(toolDef.endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message: userMessage, context: currentState.context }),
+            });
+            const toolResult = await toolResponse.json();
+            const toolLatency = Date.now() - toolStart;
+
+            await supabase.from("tool_call_logs").insert({
+              conversation_id: convId,
+              tenant_id: tenantConfig.tenant_id,
+              tool_id: toolId,
+              input: { message: userMessage },
+              output: toolResult,
+              status: toolResponse.ok ? "success" : "error",
+              latency_ms: toolLatency,
+            });
+
+            currentState.context = {
+              ...currentState.context,
+              tool_result: toolResult,
+              last_tool_id: toolId,
+              last_tool_latency: toolLatency,
+            };
+          } catch (err) {
+            const toolLatency = Date.now() - toolStart;
+            await supabase.from("tool_call_logs").insert({
+              conversation_id: convId,
+              tenant_id: tenantConfig.tenant_id,
+              tool_id: toolId,
+              input: { message: userMessage },
+              status: "error",
+              latency_ms: toolLatency,
+              error_message: err instanceof Error ? err.message : "Unknown",
+            });
+            currentState.context = { ...currentState.context, tool_result: { error: true }, last_tool_id: toolId };
+          }
+        }
+
+        const next = getNextNode(nodes, edges, currentNode.id);
+        currentNode = next;
+        continue;
+      }
+
+      case "handoff": {
+        // Create handoff event
+        const priority = currentNode.data?.priority || "normal";
+        const reason = currentNode.data?.label || "Flow-triggered handoff";
+
+        await supabase.from("handoff_events").insert({
+          tenant_id: tenantConfig.tenant_id,
+          conversation_id: convId,
+          priority,
+          reason,
+          status: "pending",
+        });
+
+        await supabase.from("conversations").update({ status: "handoff" }).eq("id", convId);
+
+        return {
+          response: `Tôi sẽ chuyển bạn cho nhân viên hỗ trợ. Lý do: ${reason}. Vui lòng đợi trong giây lát.`,
+          handoff: { priority, reason },
+          new_state: null, // flow ends
+          sources: ragSources,
+        };
+      }
+
+      default: {
+        // Unknown node type, try to advance
+        const next = getNextNode(nodes, edges, currentNode.id);
+        currentNode = next;
+        continue;
+      }
+    }
+  }
+
+  // Flow ended without a response node — fall through to normal LLM
+  return { response: "", new_state: null, sources: ragSources };
+}
+
+/**
+ * Use LLM to evaluate a condition expression in the context of conversation
+ */
+async function evaluateCondition(
+  tenantConfig: any,
+  chatMessages: Array<{ role: string; content: string }>,
+  conditionExpr: string,
+  flowContext: Record<string, any>,
+): Promise<boolean> {
+  const providerEndpoint = tenantConfig.provider_endpoint;
+  const providerApiKey = tenantConfig.provider_api_key;
+  const model = tenantConfig.provider_model;
+
+  if (!providerEndpoint || !providerApiKey || !model) return true; // default yes
+
+  const completionUrl = providerEndpoint.endsWith("/chat/completions")
+    ? providerEndpoint
+    : `${providerEndpoint.replace(/\/$/, "")}/chat/completions`;
+
+  const evalPrompt = `You are an evaluator. Given the conversation so far and the flow context, evaluate whether the following condition is TRUE or FALSE.
+
+Condition: "${conditionExpr}"
+
+Flow context variables: ${JSON.stringify(flowContext)}
+
+Reply with ONLY "TRUE" or "FALSE", nothing else.`;
+
+  try {
+    const response = await fetch(completionUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${providerApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          ...chatMessages.slice(-6), // last 6 messages for context
+          { role: "system", content: evalPrompt },
+        ],
+        temperature: 0,
+        max_tokens: 10,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) return true;
+    const data = await response.json();
+    const answer = (data.choices?.[0]?.message?.content || "").trim().toUpperCase();
+    return answer.includes("TRUE");
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Call LLM with optional flow instruction overlay
+ */
+async function callLLM(
+  tenantConfig: any,
+  chatMessages: Array<{ role: string; content: any }>,
+  ragContext: string,
+  ragSources: string[],
+  flowSystemAddition: string,
+  enabledTools: any[] | null,
+): Promise<{ content: string; tool_used?: string; tool_latency_ms?: number }> {
+  const providerEndpoint = tenantConfig.provider_endpoint;
+  const providerApiKey = tenantConfig.provider_api_key;
+  const model = tenantConfig.provider_model;
+
+  if (!providerEndpoint || !providerApiKey || !model) {
+    return { content: "AI chưa được cấu hình." };
+  }
+
+  let systemPrompt = tenantConfig.system_prompt ||
+    `You are an AI support assistant. Be helpful, concise, and professional.`;
+
+  systemPrompt += RESPONSE_FORMAT_INSTRUCTIONS;
+
+  if (ragContext) {
+    systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\n${ragContext}\n--- END CONTEXT ---`;
+  }
+
+  systemPrompt += flowSystemAddition;
+
+  const completionUrl = providerEndpoint.endsWith("/chat/completions")
+    ? providerEndpoint
+    : `${providerEndpoint.replace(/\/$/, "")}/chat/completions`;
+
+  const toolsPayload = enabledTools?.length ? enabledTools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.tool_id,
+      description: t.description || t.name,
+      parameters: t.input_schema || { type: "object", properties: {} },
+    },
+  })) : undefined;
+
+  const payload: Record<string, unknown> = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...chatMessages,
+    ],
+    temperature: tenantConfig.temperature || 0.3,
+    max_tokens: tenantConfig.max_tokens || 2048,
+    stream: false,
+  };
+  if (toolsPayload) payload.tools = toolsPayload;
+
+  const llmResponse = await fetch(completionUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${providerApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!llmResponse.ok) {
+    console.error(`LLM error [${llmResponse.status}]`);
+    return { content: "Xin lỗi, đã có lỗi khi kết nối tới AI." };
+  }
+
+  const llmData = await llmResponse.json();
+  const choice = llmData.choices?.[0];
+  let content = choice?.message?.content || "Không có phản hồi.";
+  let toolUsed: string | undefined;
+  let toolLatency: number | undefined;
+
+  // Handle tool calls from LLM
+  if (choice?.message?.tool_calls?.length) {
+    const toolCall = choice.message.tool_calls[0];
+    toolUsed = toolCall.function.name;
+    const toolStart = Date.now();
+    const toolDef = enabledTools?.find(t => t.tool_id === toolUsed);
+    if (toolDef) {
+      try {
+        const toolResponse = await fetch(toolDef.endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: toolCall.function.arguments,
+        });
+        const toolResult = await toolResponse.json();
+        toolLatency = Date.now() - toolStart;
+
+        const followUp = await fetch(completionUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${providerApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              ...payload.messages as object[],
+              choice.message,
+              { role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(toolResult) },
+            ],
+            temperature: tenantConfig.temperature || 0.3,
+          }),
+        });
+        if (followUp.ok) {
+          const followUpData = await followUp.json();
+          content = followUpData.choices?.[0]?.message?.content || content;
+        }
+      } catch {
+        toolLatency = Date.now() - toolStart;
+        content = "Xin lỗi, tôi gặp lỗi khi tra cứu thông tin.";
+      }
+    }
+  }
+
+  return { content, tool_used: toolUsed, tool_latency_ms: toolLatency };
+}
+
+const RESPONSE_FORMAT_INSTRUCTIONS = `
+
+--- RESPONSE FORMATTING ---
+You support special rich content blocks in your responses:
+
+1. **Mermaid diagrams** - Use for flowcharts, sequence diagrams, etc:
+\`\`\`mermaid
+graph TD
+A[Start] --> B[Step 1]
+B --> C{Decision}
+C -- Yes --> D[Result A]
+C -- No --> E[Result B]
+\`\`\`
+
+2. **Charts** - Use for data visualization:
+\`\`\`chart
+{"type":"bar","title":"Sales","data":[{"month":"Jan","value":100},{"month":"Feb","value":200}]}
+\`\`\`
+
+3. **Downloadable files** - Use when user asks for files/exports/Excel/CSV:
+\`\`\`file:report.csv
+col1,col2,col3
+data1,data2,data3
+\`\`\`
+Supported extensions: .csv, .txt, .json, .xml, .html, .md, .xlsx
+When user asks for Excel/spreadsheet, generate a .csv file (the system auto-converts to real .xlsx with formatting).
+
+Use these formats when appropriate. For diagrams/flowcharts, always prefer mermaid over text descriptions.
+--- END FORMATTING ---`;
+
+// ==================== MAIN HANDLER ====================
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -91,6 +617,8 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Attach tenant_id to config for flow engine use
+    tenantConfig.tenant_id = tenant_id;
 
     // Rate limiting
     const rateLimitKey = `${tenant_id}:${conversation_id || "new"}:${end_user?.email || "anon"}`;
@@ -128,6 +656,7 @@ serve(async (req) => {
 
     // 2. Get or create conversation
     let convId = conversation_id;
+    let conversationMetadata: any = {};
     if (!convId) {
       const { data: conv, error: convError } = await supabase
         .from("conversations")
@@ -138,7 +667,7 @@ serve(async (req) => {
           end_user_phone: end_user?.phone || null,
           status: "active",
         })
-        .select("id")
+        .select("id, metadata")
         .single();
 
       if (convError) {
@@ -149,8 +678,8 @@ serve(async (req) => {
         });
       }
       convId = conv.id;
+      conversationMetadata = conv.metadata || {};
 
-      // Webhook notification for new conversation
       if (tenantConfig.webhook_url) {
         dispatchWebhook(tenantConfig.webhook_url, {
           event: "conversation.created",
@@ -159,9 +688,17 @@ serve(async (req) => {
           end_user,
         }).catch((e) => console.warn("Webhook dispatch failed:", e));
       }
+    } else {
+      // Load existing conversation metadata for flow state
+      const { data: existingConv } = await supabase
+        .from("conversations")
+        .select("metadata")
+        .eq("id", convId)
+        .single();
+      conversationMetadata = existingConv?.metadata || {};
     }
 
-    // 3. Build enriched message with attachment content
+    // 3. Build enriched message
     let enrichedMessage = processedMessage || "";
     const imageAttachments: Array<{ type: string; image_url: { url: string } }> = [];
     let hasKbImportedFiles = false;
@@ -169,10 +706,7 @@ serve(async (req) => {
     if (attachments && Array.isArray(attachments)) {
       for (const att of attachments) {
         if (att.type === "image" && att.content) {
-          imageAttachments.push({
-            type: "image_url",
-            image_url: { url: att.content },
-          });
+          imageAttachments.push({ type: "image_url", image_url: { url: att.content } });
         } else if (att.strategy === "kb_imported") {
           hasKbImportedFiles = true;
           if (att.content) enrichedMessage += `\n\n${att.content}`;
@@ -202,7 +736,6 @@ serve(async (req) => {
       return { role, content: m.content };
     });
 
-    // Replace last user message with enriched version
     if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
       if (imageAttachments.length > 0) {
         (chatMessages[chatMessages.length - 1] as any).content = [
@@ -214,7 +747,7 @@ serve(async (req) => {
       }
     }
 
-    // 5. RAG: Search knowledge base (vector + text hybrid)
+    // 5. RAG
     let ragContext = "";
     let ragSources: string[] = [];
     try {
@@ -222,232 +755,126 @@ serve(async (req) => {
       ragContext = ragResult.context;
       ragSources = ragResult.sources;
     } catch (ragErr) {
-      console.warn("RAG search failed, continuing without:", ragErr);
+      console.warn("RAG search failed:", ragErr);
     }
 
-    // 6. Get tenant's enabled tools
+    // 6. Get enabled tools
     const { data: enabledTools } = await supabase
       .from("tool_definitions")
       .select("*")
       .eq("tenant_id", tenant_id)
       .eq("enabled", true);
 
-    // 7. Build system prompt with RAG context
-    let systemPrompt = tenantConfig.system_prompt ||
-      `You are an AI support assistant. Be helpful, concise, and professional. If you're not confident about an answer (below ${tenantConfig.confidence_threshold || 0.6} confidence), suggest escalating to a human agent. Always cite sources when using knowledge base information.`;
+    // ==================== FLOW ENGINE ====================
+    // Check if tenant has an active published flow
+    const activeFlow = await loadActiveFlow(supabase, tenant_id);
+    
+    if (activeFlow) {
+      console.log(`[Flow Engine] Active flow found: ${activeFlow.flowId}`);
+      
+      // Get flow state from conversation metadata
+      const flowState: FlowState | null = conversationMetadata?.flow_state || null;
 
-    // Add rich content format instructions
-    systemPrompt += `
+      const result = await executeFlow(
+        supabase,
+        activeFlow,
+        flowState,
+        message,
+        convId,
+        tenantConfig,
+        chatMessages,
+        enabledTools,
+        ragContext,
+        ragSources,
+      );
 
---- RESPONSE FORMATTING ---
-You support special rich content blocks in your responses:
+      if (result.response) {
+        // Save bot response
+        await supabase.from("messages").insert({
+          conversation_id: convId,
+          role: "bot",
+          content: result.response,
+          tool_used: result.tool_used || null,
+          tool_latency_ms: result.tool_latency_ms || null,
+          sources: result.sources?.length ? result.sources : null,
+        });
 
-1. **Mermaid diagrams** - Use for flowcharts, sequence diagrams, etc:
-\`\`\`mermaid
-graph TD
-A[Start] --> B[Step 1]
-B --> C{Decision}
-C -- Yes --> D[Result A]
-C -- No --> E[Result B]
-\`\`\`
+        // Update conversation metadata with new flow state
+        const newMetadata = {
+          ...conversationMetadata,
+          flow_state: result.new_state,
+        };
+        await supabase.from("conversations").update({
+          metadata: newMetadata,
+          updated_at: new Date().toISOString(),
+        }).eq("id", convId);
 
-2. **Charts** - Use for data visualization:
-\`\`\`chart
-{"type":"bar","title":"Sales","data":[{"month":"Jan","value":100},{"month":"Feb","value":200}]}
-\`\`\`
+        // Audit log
+        await supabase.from("audit_logs").insert({
+          tenant_id,
+          actor_type: "bot",
+          action: "flow_chat_response",
+          resource_type: "conversation",
+          resource_id: convId,
+          details: {
+            flow_id: activeFlow.flowId,
+            current_node: result.new_state?.current_node_id || "ended",
+            step_count: result.new_state?.step_count || 0,
+            tool_used: result.tool_used,
+            handoff: result.handoff,
+          },
+        });
 
-3. **Downloadable files** - Use when user asks for files/exports/Excel/CSV:
-\`\`\`file:report.csv
-col1,col2,col3
-data1,data2,data3
-\`\`\`
-Supported extensions: .csv, .txt, .json, .xml, .html, .md, .xlsx
-When user asks for Excel/spreadsheet, generate a .csv file (the system auto-converts to real .xlsx with formatting).
-
-Use these formats when appropriate. For diagrams/flowcharts, always prefer mermaid over text descriptions.
---- END FORMATTING ---`;
-
-    if (ragContext) {
-      systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\nUse the following information to answer the user's question. Cite the source documents when relevant.\n\n${ragContext}\n--- END CONTEXT ---`;
-    }
-
-    if (hasKbImportedFiles) {
-      systemPrompt += `\n\nNote: The user has uploaded large files that were imported to the knowledge base. Use the context above to answer questions about them.`;
-    }
-
-    // 8. Call the tenant's configured LLM
-    const providerEndpoint = tenantConfig.provider_endpoint;
-    const providerApiKey = tenantConfig.provider_api_key;
-    const model = tenantConfig.provider_model;
-
-    if (!providerEndpoint || !providerApiKey || !model) {
-      const fallbackResponse = "Xin lỗi, hệ thống AI chưa được cấu hình cho tenant này. Vui lòng liên hệ quản trị viên.";
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        role: "bot",
-        content: fallbackResponse,
-      });
-      return new Response(JSON.stringify({
-        conversation_id: convId,
-        response: fallbackResponse,
-        confidence: 0,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const toolsPayload = enabledTools?.length ? enabledTools.map((t) => ({
-      type: "function",
-      function: {
-        name: t.tool_id,
-        description: t.description || t.name,
-        parameters: t.input_schema || { type: "object", properties: {} },
-      },
-    })) : undefined;
-
-    const llmPayload: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...chatMessages,
-      ],
-      temperature: tenantConfig.temperature || 0.3,
-      max_tokens: tenantConfig.max_tokens || 2048,
-      stream: false,
-    };
-    if (toolsPayload) {
-      llmPayload.tools = toolsPayload;
-    }
-
-    const completionUrl = providerEndpoint.endsWith("/chat/completions")
-      ? providerEndpoint
-      : `${providerEndpoint.replace(/\/$/, "")}/chat/completions`;
-
-    const llmResponse = await fetch(completionUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${providerApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(llmPayload),
-    });
-
-    if (!llmResponse.ok) {
-      const errorText = await llmResponse.text();
-      console.error(`LLM API error [${llmResponse.status}]:`, errorText);
-
-      const errorResponse = "Xin lỗi, đã có lỗi khi kết nối tới AI. Vui lòng thử lại sau.";
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        role: "bot",
-        content: errorResponse,
-      });
-
-      await supabase.from("audit_logs").insert({
-        tenant_id,
-        actor_type: "bot",
-        action: "llm_error",
-        details: { status: llmResponse.status, error: errorText.substring(0, 500) },
-      });
-
-      return new Response(JSON.stringify({
-        conversation_id: convId,
-        response: errorResponse,
-        confidence: 0,
-        error: "LLM provider error",
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const llmData = await llmResponse.json();
-    const choice = llmData.choices?.[0];
-    let botContent = choice?.message?.content || "Không có phản hồi từ AI.";
-    let toolUsed: string | undefined;
-    let toolLatency: number | undefined;
-
-    // Handle tool calls
-    if (choice?.message?.tool_calls?.length) {
-      const toolCall = choice.message.tool_calls[0];
-      toolUsed = toolCall.function.name;
-      const toolStart = Date.now();
-
-      const toolDef = enabledTools?.find((t) => t.tool_id === toolUsed);
-      if (toolDef) {
-        try {
-          const toolResponse = await fetch(toolDef.endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: toolCall.function.arguments,
-          });
-          const toolResult = await toolResponse.json();
-          toolLatency = Date.now() - toolStart;
-
-          await supabase.from("tool_call_logs").insert({
-            conversation_id: convId,
+        if (result.handoff && tenantConfig.webhook_url) {
+          dispatchWebhook(tenantConfig.webhook_url, {
+            event: "handoff.triggered",
             tenant_id,
-            tool_id: toolUsed,
-            input: JSON.parse(toolCall.function.arguments || "{}"),
-            output: toolResult,
-            status: toolResponse.ok ? "success" : "error",
-            latency_ms: toolLatency,
-          });
-
-          const followUp = await fetch(completionUrl, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${providerApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                ...llmPayload.messages as object[],
-                choice.message,
-                { role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(toolResult) },
-              ],
-              temperature: tenantConfig.temperature || 0.3,
-            }),
-          });
-
-          if (followUp.ok) {
-            const followUpData = await followUp.json();
-            botContent = followUpData.choices?.[0]?.message?.content || botContent;
-          }
-        } catch (toolError) {
-          toolLatency = Date.now() - toolStart;
-          console.error("Tool call failed:", toolError);
-
-          await supabase.from("tool_call_logs").insert({
             conversation_id: convId,
-            tenant_id,
-            tool_id: toolUsed,
-            input: JSON.parse(toolCall.function.arguments || "{}"),
-            status: "error",
-            latency_ms: toolLatency,
-            error_message: toolError instanceof Error ? toolError.message : "Unknown error",
-          });
-
-          botContent = "Xin lỗi, tôi gặp lỗi khi tra cứu thông tin. Để tôi chuyển cho nhân viên hỗ trợ.";
+            priority: result.handoff.priority,
+            reason: result.handoff.reason,
+          }).catch(() => {});
         }
+
+        return new Response(JSON.stringify({
+          conversation_id: convId,
+          response: result.response,
+          tool_used: result.tool_used,
+          tool_latency_ms: result.tool_latency_ms,
+          sources: result.sources,
+          flow_active: true,
+          flow_node: result.new_state?.current_node_id || null,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      // If flow returned empty response, fall through to normal LLM
+      console.log("[Flow Engine] Flow returned empty response, falling through to normal LLM");
     }
 
-    // 9. Save bot response
+    // ==================== NORMAL LLM (no active flow) ====================
+    const llmResult = await callLLM(
+      tenantConfig,
+      chatMessages,
+      ragContext,
+      ragSources,
+      hasKbImportedFiles
+        ? "\n\nNote: The user uploaded files imported to knowledge base. Use context above."
+        : "",
+      enabledTools,
+    );
+
+    // Save bot response
     await supabase.from("messages").insert({
       conversation_id: convId,
       role: "bot",
-      content: botContent,
-      tool_used: toolUsed || null,
-      tool_latency_ms: toolLatency || null,
+      content: llmResult.content,
+      tool_used: llmResult.tool_used || null,
+      tool_latency_ms: llmResult.tool_latency_ms || null,
       sources: ragSources.length > 0 ? ragSources : null,
     });
 
-    // 10. Update conversation metadata
     await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convId);
 
-    // 11. Audit log
     await supabase.from("audit_logs").insert({
       tenant_id,
       actor_type: "bot",
@@ -455,29 +882,28 @@ Use these formats when appropriate. For diagrams/flowcharts, always prefer merma
       resource_type: "conversation",
       resource_id: convId,
       details: {
-        tool_used: toolUsed,
-        model,
+        tool_used: llmResult.tool_used,
+        model: tenantConfig.provider_model,
         rag_sources: ragSources,
-        pii_masked: tenantConfig.pii_masking,
       },
     });
 
-    // 12. Webhook for handoff scenarios
-    if (tenantConfig.webhook_url && botContent.includes("chuyển cho nhân viên")) {
+    if (tenantConfig.webhook_url && llmResult.content.includes("chuyển cho nhân viên")) {
       dispatchWebhook(tenantConfig.webhook_url, {
         event: "handoff.suggested",
         tenant_id,
         conversation_id: convId,
         reason: "Bot suggested agent handoff",
-      }).catch((e) => console.warn("Webhook dispatch failed:", e));
+      }).catch(() => {});
     }
 
     return new Response(JSON.stringify({
       conversation_id: convId,
-      response: botContent,
-      tool_used: toolUsed,
-      tool_latency_ms: toolLatency,
+      response: llmResult.content,
+      tool_used: llmResult.tool_used,
+      tool_latency_ms: llmResult.tool_latency_ms,
       sources: ragSources,
+      flow_active: false,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -490,9 +916,8 @@ Use these formats when appropriate. For diagrams/flowcharts, always prefer merma
   }
 });
 
-/**
- * Hybrid RAG search: vector similarity + text search fallback
- */
+// ==================== HELPER FUNCTIONS ====================
+
 async function searchKnowledgeBase(
   supabase: any,
   tenantId: string,
@@ -502,7 +927,6 @@ async function searchKnowledgeBase(
   let chunks: any[] = [];
   let sources: string[] = [];
 
-  // Try vector search first if embeddings are available
   if (tenantConfig.provider_endpoint && tenantConfig.provider_api_key) {
     try {
       const queryEmbedding = await generateQueryEmbedding(
@@ -510,7 +934,6 @@ async function searchKnowledgeBase(
         tenantConfig.provider_endpoint,
         tenantConfig.provider_api_key
       );
-
       if (queryEmbedding) {
         const { data: vectorResults, error } = await supabase.rpc("match_kb_chunks", {
           _tenant_id: tenantId,
@@ -518,25 +941,21 @@ async function searchKnowledgeBase(
           _match_threshold: 0.5,
           _match_count: 5,
         });
-
         if (!error && vectorResults?.length) {
           chunks = vectorResults;
-          console.log(`Vector search found ${chunks.length} chunks`);
         }
       }
     } catch (e) {
-      console.warn("Vector search failed, falling back to text:", e);
+      console.warn("Vector search failed:", e);
     }
   }
 
-  // Fallback: text-based search
   if (chunks.length === 0) {
     const searchTerms = query
       .replace(/[^\w\sàáạảãăắằặẳẵâấầậẩẫèéẹẻẽêếềệểễìíịỉĩòóọỏõôốồộổỗơớờợởỡùúụủũưứừựửữỳýỵỷỹđ]/gi, "")
       .split(/\s+/)
       .filter((w) => w.length > 2)
       .slice(0, 8);
-
     if (searchTerms.length === 0) return { context: "", sources: [] };
 
     const { data: textChunks, error } = await supabase
@@ -561,16 +980,13 @@ async function searchKnowledgeBase(
 
   if (chunks.length === 0) return { context: "", sources: [] };
 
-  // Get source document names
   const docIds = [...new Set(chunks.map((c: any) => c.document_id))];
   if (docIds.length > 0) {
     const { data: docs } = await supabase
       .from("kb_documents")
       .select("id, name")
       .in("id", docIds);
-    if (docs) {
-      sources = docs.map((d: any) => d.name);
-    }
+    if (docs) sources = docs.map((d: any) => d.name);
   }
 
   const context = chunks.map((c: any) => {
@@ -581,9 +997,6 @@ async function searchKnowledgeBase(
   return { context, sources };
 }
 
-/**
- * Generate embedding for a query
- */
 async function generateQueryEmbedding(
   query: string,
   endpoint: string,
@@ -592,21 +1005,15 @@ async function generateQueryEmbedding(
   try {
     const baseUrl = endpoint.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
     const embeddingUrl = `${baseUrl}/embeddings`;
-
     const response = await fetch(embeddingUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "text-embedding-3-small",
-        input: query,
-      }),
+      body: JSON.stringify({ model: "text-embedding-3-small", input: query }),
     });
-
     if (!response.ok) return null;
-
     const data = await response.json();
     return data?.data?.[0]?.embedding || null;
   } catch {
@@ -614,19 +1021,13 @@ async function generateQueryEmbedding(
   }
 }
 
-/**
- * Dispatch webhook notification
- */
 async function dispatchWebhook(url: string, payload: any): Promise<void> {
   if (!url) return;
   try {
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        timestamp: new Date().toISOString(),
-      }),
+      body: JSON.stringify({ ...payload, timestamp: new Date().toISOString() }),
     });
   } catch (e) {
     console.warn("Webhook dispatch error:", e);
