@@ -4,11 +4,12 @@ import StatCard from "@/components/dashboard/StatCard";
 import { useConversations, useHandoffEvents, useConversationStats } from "@/hooks/use-data";
 import { useRealtimeConversations, useRealtimeHandoffs } from "@/hooks/use-realtime";
 import {
-  MessageSquare, Bot, ArrowUpRight, Clock, CheckCircle2, AlertTriangle, Activity,
+  MessageSquare, Bot, ArrowUpRight, Clock, CheckCircle2, AlertTriangle, Activity, Timer, Zap,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { SlaTimer } from "@/components/handoff/SlaTimer";
 
 const intentColors: Record<string, string> = {
   how_to_use: "bg-info/10 text-info",
@@ -29,13 +30,11 @@ const Dashboard = () => {
   const { data: handoffs } = useHandoffEvents();
   const { data: stats } = useConversationStats();
 
-  // Realtime subscriptions
   useRealtimeConversations();
   useRealtimeHandoffs();
 
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
-  // Refresh timestamp every 30s
   useEffect(() => {
     const interval = setInterval(() => setLastUpdate(new Date()), 30000);
     return () => clearInterval(interval);
@@ -47,8 +46,27 @@ const Dashboard = () => {
   const resolvedCount = conversations?.filter((c) => c.status === "resolved").length || 0;
   const deflectionRate = totalConvs > 0 ? ((resolvedCount / totalConvs) * 100).toFixed(1) : "0";
 
+  // SLA metrics
+  const resolvedHandoffs = (handoffs || []).filter((h) => h.resolved_at && h.created_at);
+  const avgResolutionMs = resolvedHandoffs.length > 0
+    ? resolvedHandoffs.reduce((sum, h) => sum + (new Date(h.resolved_at!).getTime() - new Date(h.created_at).getTime()), 0) / resolvedHandoffs.length
+    : 0;
+  const avgResolutionMin = Math.round(avgResolutionMs / 60000);
+
+  const respondedHandoffs = (handoffs || []).filter((h: any) => h.first_response_at);
+  const avgResponseMs = respondedHandoffs.length > 0
+    ? respondedHandoffs.reduce((sum, h: any) => sum + (new Date(h.first_response_at).getTime() - new Date(h.created_at).getTime()), 0) / respondedHandoffs.length
+    : 0;
+  const avgResponseMin = Math.round(avgResponseMs / 60000);
+
+  const slaBreachedCount = (handoffs || []).filter((h: any) => {
+    if (!h.sla_deadline_at) return false;
+    const responseTime = h.first_response_at ? new Date(h.first_response_at) : new Date();
+    return responseTime > new Date(h.sla_deadline_at);
+  }).length;
+
   const recentConvs = (conversations || []).slice(0, 8);
-  const recentHandoffs = (handoffs || []).filter((h) => h.status === "pending").slice(0, 5);
+  const recentHandoffs = (handoffs || []).filter((h) => h.status !== "resolved").slice(0, 5);
 
   return (
     <AdminLayout>
@@ -64,11 +82,36 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* Main stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Tổng hội thoại" value={String(totalConvs)} icon={MessageSquare} subtitle="tất cả tenants" />
           <StatCard title="Deflection Rate" value={`${deflectionRate}%`} icon={Bot} subtitle="bot xử lý xong" />
           <StatCard title="Đang hoạt động" value={String(activeConvs)} icon={Clock} subtitle="conversations active" />
           <StatCard title="Handoff pending" value={String(handoffCount)} icon={ArrowUpRight} subtitle="chờ agent nhận" />
+        </div>
+
+        {/* SLA stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard
+            title="Avg Response Time"
+            value={avgResponseMin > 0 ? `${avgResponseMin}m` : "—"}
+            icon={Zap}
+            subtitle={respondedHandoffs.length > 0 ? `${respondedHandoffs.length} handoffs` : "chưa có dữ liệu"}
+          />
+          <StatCard
+            title="Avg Resolution Time"
+            value={avgResolutionMin > 0 ? `${avgResolutionMin}m` : "—"}
+            icon={Timer}
+            subtitle={resolvedHandoffs.length > 0 ? `${resolvedHandoffs.length} resolved` : "chưa có dữ liệu"}
+          />
+          <StatCard
+            title="SLA Breached"
+            value={String(slaBreachedCount)}
+            icon={AlertTriangle}
+            subtitle="vượt thời gian response"
+            changeType={slaBreachedCount > 0 ? "negative" : "positive"}
+            change={slaBreachedCount === 0 ? "✓ Tốt" : `${slaBreachedCount} vi phạm`}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -121,7 +164,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Pending handoffs sidebar */}
+          {/* Pending handoffs sidebar with SLA */}
           <div className="rounded-lg border bg-card">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div className="flex items-center gap-2">
@@ -150,7 +193,16 @@ const Dashboard = () => {
                       {format(new Date(h.created_at), "HH:mm")}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2">{h.reason}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-1">{h.reason}</p>
+                  <div className="mt-1">
+                    <SlaTimer
+                      createdAt={h.created_at}
+                      slaDeadlineAt={(h as any).sla_deadline_at}
+                      firstResponseAt={(h as any).first_response_at}
+                      resolvedAt={h.resolved_at}
+                      compact
+                    />
+                  </div>
                 </div>
               ))}
             </div>

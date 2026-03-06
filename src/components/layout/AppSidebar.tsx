@@ -1,5 +1,6 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -46,10 +47,11 @@ export const AppSidebar = () => {
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary glow-primary">
           <Bot className="h-5 w-5 text-primary-foreground" />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-tight">AI Support</h1>
           <p className="text-[11px] text-sidebar-muted">Multi-tenant Platform</p>
         </div>
+        <NotificationBell />
       </div>
 
       {/* Nav */}
