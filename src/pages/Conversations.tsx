@@ -325,8 +325,20 @@ const Conversations = () => {
                             👤 manual
                           </span>
                         )}
+                        {msg.role !== "user" && !(msg.metadata as any)?.manual_reply && selectedConv && (
+                          <MessageCorrectionButton
+                            messageId={msg.id}
+                            conversationId={selectedConv.id}
+                            tenantId={selectedConv.tenant_id}
+                            originalContent={msg.content}
+                            userQuestion={(() => {
+                              const idx = messages?.findIndex((m) => m.id === msg.id) || 0;
+                              const prev = messages?.[idx - 1];
+                              return prev?.role === "user" ? prev.content : undefined;
+                            })()}
+                          />
+                        )}
                       </div>
-                      {msg.sources && Array.isArray(msg.sources) && (msg.sources as string[]).length > 0 && (
                         <div className="mt-2 pt-2 border-t border-border/50">
                           <p className="text-[10px] text-muted-foreground">📚 Sources: {(msg.sources as string[]).join(", ")}</p>
                         </div>
