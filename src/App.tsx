@@ -16,6 +16,7 @@ import Analytics from "./pages/Analytics";
 import Agents from "./pages/Agents";
 import FlowBuilder from "./pages/FlowBuilder";
 import AuditLogs from "./pages/AuditLogs";
+import BotMemory from "./pages/BotMemory";
 import WidgetDemo from "./pages/WidgetDemo";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -53,6 +54,7 @@ const App = () => (
             <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             <Route path="/flows" element={<ProtectedRoute><FlowBuilder /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute><AuditLogs /></ProtectedRoute>} />
+            <Route path="/bot-memory" element={<ProtectedRoute><BotMemory /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />

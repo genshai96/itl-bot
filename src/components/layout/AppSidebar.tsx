@@ -16,6 +16,7 @@ import {
   GitBranch,
   ScrollText,
   Headset,
+  Brain,
 } from "lucide-react";
 
 const allNavItems = [
@@ -25,6 +26,7 @@ const allNavItems = [
   { to: "/handoff", label: "Handoff Queue", icon: AlertTriangle, minRole: "support_agent" as const },
   { to: "/knowledge", label: "Knowledge Base", icon: FileText, minRole: "support_lead" as const },
   { to: "/flows", label: "Flow Builder", icon: GitBranch, minRole: "tenant_admin" as const },
+  { to: "/bot-memory", label: "Memory & Skills", icon: Brain, minRole: "support_lead" as const },
   { to: "/agents", label: "Operators", icon: Users, minRole: "support_lead" as const },
   { to: "/analytics", label: "Analytics", icon: BarChart3, minRole: "support_lead" as const },
   { to: "/audit-logs", label: "Audit Logs", icon: ScrollText, minRole: "tenant_admin" as const },
