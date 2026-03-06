@@ -228,6 +228,11 @@ const TenantDetail = () => {
           widget_collect_name: widgetConfig.collectName,
           widget_collect_email: widgetConfig.collectEmail,
           widget_collect_phone: widgetConfig.collectPhone,
+          widget_collect_role: widgetConfig.collectRole,
+          widget_role_options: widgetConfig.roleOptionsText
+            .split(",")
+            .map((x: string) => x.trim())
+            .filter(Boolean),
           widget_show_powered_by: widgetConfig.showPoweredBy,
           widget_auto_open: widgetConfig.autoOpen,
           widget_auto_open_delay: widgetConfig.autoOpenDelay,
