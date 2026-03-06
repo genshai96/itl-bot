@@ -441,6 +441,337 @@ export type Database = {
           },
         ]
       }
+      mcp_health_events: {
+        Row: {
+          created_at: string
+          details: Json
+          event_type: string
+          id: string
+          tenant_id: string
+          tenant_mcp_binding_id: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          event_type: string
+          id?: string
+          tenant_id: string
+          tenant_mcp_binding_id: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          event_type?: string
+          id?: string
+          tenant_id?: string
+          tenant_mcp_binding_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_health_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcp_health_events_tenant_mcp_binding_id_fkey"
+            columns: ["tenant_mcp_binding_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_mcp_bindings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcp_runtime_state: {
+        Row: {
+          circuit_open_until: string | null
+          circuit_state: string
+          failure_count: number
+          id: string
+          last_error: string | null
+          last_failure_at: string | null
+          last_health_status: string | null
+          last_healthcheck_at: string | null
+          last_success_at: string | null
+          tenant_id: string
+          tenant_mcp_binding_id: string
+          updated_at: string
+        }
+        Insert: {
+          circuit_open_until?: string | null
+          circuit_state?: string
+          failure_count?: number
+          id?: string
+          last_error?: string | null
+          last_failure_at?: string | null
+          last_health_status?: string | null
+          last_healthcheck_at?: string | null
+          last_success_at?: string | null
+          tenant_id: string
+          tenant_mcp_binding_id: string
+          updated_at?: string
+        }
+        Update: {
+          circuit_open_until?: string | null
+          circuit_state?: string
+          failure_count?: number
+          id?: string
+          last_error?: string | null
+          last_failure_at?: string | null
+          last_health_status?: string | null
+          last_healthcheck_at?: string | null
+          last_success_at?: string | null
+          tenant_id?: string
+          tenant_mcp_binding_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_runtime_state_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcp_runtime_state_tenant_mcp_binding_id_fkey"
+            columns: ["tenant_mcp_binding_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_mcp_bindings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcp_servers: {
+        Row: {
+          auth_type: string
+          created_at: string
+          endpoint: string
+          healthcheck_path: string | null
+          id: string
+          metadata: Json
+          name: string
+          server_key: string
+          status: string
+          transport: string
+          updated_at: string
+        }
+        Insert: {
+          auth_type?: string
+          created_at?: string
+          endpoint: string
+          healthcheck_path?: string | null
+          id?: string
+          metadata?: Json
+          name: string
+          server_key: string
+          status?: string
+          transport?: string
+          updated_at?: string
+        }
+        Update: {
+          auth_type?: string
+          created_at?: string
+          endpoint?: string
+          healthcheck_path?: string | null
+          id?: string
+          metadata?: Json
+          name?: string
+          server_key?: string
+          status?: string
+          transport?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      mcp_tool_policies: {
+        Row: {
+          config: Json
+          created_at: string
+          enabled: boolean
+          id: string
+          max_calls_per_minute: number | null
+          pii_scope: string
+          required_roles: Json
+          tenant_id: string
+          tenant_mcp_binding_id: string | null
+          tool_id: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          max_calls_per_minute?: number | null
+          pii_scope?: string
+          required_roles?: Json
+          tenant_id: string
+          tenant_mcp_binding_id?: string | null
+          tool_id: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          max_calls_per_minute?: number | null
+          pii_scope?: string
+          required_roles?: Json
+          tenant_id?: string
+          tenant_mcp_binding_id?: string | null
+          tool_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_tool_policies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcp_tool_policies_tenant_mcp_binding_id_fkey"
+            columns: ["tenant_mcp_binding_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_mcp_bindings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_access_logs: {
+        Row: {
+          action: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          memory_item_id: string | null
+          relevance_score: number | null
+          tenant_id: string
+          user_ref: string | null
+        }
+        Insert: {
+          action?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          memory_item_id?: string | null
+          relevance_score?: number | null
+          tenant_id: string
+          user_ref?: string | null
+        }
+        Update: {
+          action?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          memory_item_id?: string | null
+          relevance_score?: number | null
+          tenant_id?: string
+          user_ref?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_access_logs_memory_item_id_fkey"
+            columns: ["memory_item_id"]
+            isOneToOne: false
+            referencedRelation: "memory_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_access_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memory_items: {
+        Row: {
+          confidence: number
+          content: string
+          created_at: string
+          id: string
+          importance: number
+          last_seen_at: string | null
+          memory_key: string
+          memory_type: string
+          risk_level: string
+          source_conversation_id: string | null
+          source_message_id: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          user_ref: string | null
+          valid_from: string | null
+          valid_to: string | null
+        }
+        Insert: {
+          confidence?: number
+          content: string
+          created_at?: string
+          id?: string
+          importance?: number
+          last_seen_at?: string | null
+          memory_key: string
+          memory_type?: string
+          risk_level?: string
+          source_conversation_id?: string | null
+          source_message_id?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          user_ref?: string | null
+          valid_from?: string | null
+          valid_to?: string | null
+        }
+        Update: {
+          confidence?: number
+          content?: string
+          created_at?: string
+          id?: string
+          importance?: number
+          last_seen_at?: string | null
+          memory_key?: string
+          memory_type?: string
+          risk_level?: string
+          source_conversation_id?: string | null
+          source_message_id?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          user_ref?: string | null
+          valid_from?: string | null
+          valid_to?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memory_items_source_conversation_id_fkey"
+            columns: ["source_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_items_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memory_items_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           confidence: number | null
@@ -562,6 +893,92 @@ export type Database = {
         }
         Relationships: []
       }
+      skills_registry: {
+        Row: {
+          category: string | null
+          created_at: string
+          description: string | null
+          id: string
+          manifest: Json
+          name: string
+          skill_id: string
+          status: string
+          updated_at: string
+          version: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          manifest?: Json
+          name: string
+          skill_id: string
+          status?: string
+          updated_at?: string
+          version?: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          manifest?: Json
+          name?: string
+          skill_id?: string
+          status?: string
+          updated_at?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      tenant_bootstrap_runs: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          mode: string
+          request: Json | null
+          result: Json | null
+          started_at: string
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          mode?: string
+          request?: Json | null
+          result?: Json | null
+          started_at?: string
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          mode?: string
+          request?: Json | null
+          result?: Json | null
+          started_at?: string
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_bootstrap_runs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_configs: {
         Row: {
           api_key: string | null
@@ -673,6 +1090,111 @@ export type Database = {
             foreignKeyName: "tenant_configs_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_mcp_bindings: {
+        Row: {
+          circuit_breaker_threshold: number
+          config: Json
+          created_at: string
+          enabled: boolean
+          id: string
+          mcp_server_id: string
+          priority: number
+          retry_max: number
+          tenant_id: string
+          timeout_ms: number
+          updated_at: string
+        }
+        Insert: {
+          circuit_breaker_threshold?: number
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          mcp_server_id: string
+          priority?: number
+          retry_max?: number
+          tenant_id: string
+          timeout_ms?: number
+          updated_at?: string
+        }
+        Update: {
+          circuit_breaker_threshold?: number
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          mcp_server_id?: string
+          priority?: number
+          retry_max?: number
+          tenant_id?: string
+          timeout_ms?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_mcp_bindings_mcp_server_id_fkey"
+            columns: ["mcp_server_id"]
+            isOneToOne: false
+            referencedRelation: "mcp_servers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_mcp_bindings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_skill_bindings: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          pinned_version: string | null
+          skill_registry_id: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          id?: string
+          pinned_version?: string | null
+          skill_registry_id: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          pinned_version?: string | null
+          skill_registry_id?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_skill_bindings_skill_registry_id_fkey"
+            columns: ["skill_registry_id"]
+            isOneToOne: false
+            referencedRelation: "skills_registry"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_skill_bindings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
