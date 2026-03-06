@@ -338,7 +338,7 @@ const Conversations = () => {
                             })()}
                           />
                         )}
-                      </div>
+                      {msg.sources && Array.isArray(msg.sources) && (msg.sources as string[]).length > 0 && (
                         <div className="mt-2 pt-2 border-t border-border/50">
                           <p className="text-[10px] text-muted-foreground">📚 Sources: {(msg.sources as string[]).join(", ")}</p>
                         </div>
