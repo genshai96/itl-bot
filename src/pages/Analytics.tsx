@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import StatCard from "@/components/dashboard/StatCard";
-import { BarChart3, TrendingUp, MessageSquare, Clock, Loader2, Download, Calendar } from "lucide-react";
+import { BarChart3, TrendingUp, MessageSquare, Clock, Loader2, Download, Calendar, ArrowUpRight } from "lucide-react";
 import { useConversationStats, useToolCallLogs, useHandoffEvents, useConversations } from "@/hooks/use-data";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,7 +29,6 @@ const Analytics = () => {
     [allConversations, cutoff]
   );
 
-  const totalConvs = stats?.total || 0;
   const allConvStats = stats?.conversations || [];
 
   // Intent distribution
@@ -55,7 +54,25 @@ const Analytics = () => {
     ? (confsWithVal.reduce((s: number, c: any) => s + (c.confidence || 0), 0) / confsWithVal.length).toFixed(2)
     : "—";
 
-  const pendingHandoffs = handoffs?.filter((h) => h.status === "pending").length || 0;
+  const filteredHandoffs = (handoffs || []).filter((h) => isAfter(new Date(h.created_at), cutoff));
+  const pendingHandoffs = filteredHandoffs.filter((h) => h.status === "pending").length;
+
+  const autoHandoffs = filteredHandoffs.filter((h) => String(h.reason || "").startsWith("[auto:"));
+  const autoHandoffRate = filteredHandoffs.length > 0
+    ? ((autoHandoffs.length / filteredHandoffs.length) * 100).toFixed(1)
+    : "0.0";
+
+  const userRequestedHandoffs = filteredHandoffs.filter((h) => String(h.reason || "").includes("[auto:user_request]"));
+
+  const slaBreached = filteredHandoffs.filter((h: any) => {
+    if (h.status === "resolved") return false;
+    if (!h.sla_deadline_at) return false;
+    return new Date(h.sla_deadline_at).getTime() < Date.now() && !h.first_response_at;
+  });
+
+  const toolFailureRate = totalTools > 0
+    ? (((totalTools - successTools) / totalTools) * 100).toFixed(1)
+    : "0.0";
 
   // Conversations per day chart
   const dailyData = useMemo(() => {
@@ -137,11 +154,13 @@ const Analytics = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           <StatCard title="Avg. Confidence" value={avgConf} icon={TrendingUp} subtitle="trung bình" />
           <StatCard title="Tool Success Rate" value={`${toolSuccessRate}%`} icon={BarChart3} subtitle={`${totalTools} calls`} />
-          <StatCard title="Total Conversations" value={String(totalConvs)} icon={MessageSquare} subtitle="tất cả tenants" />
-          <StatCard title="Pending Handoffs" value={String(pendingHandoffs)} icon={Clock} subtitle="chờ xử lý" />
+          <StatCard title="Tool Failure Rate" value={`${toolFailureRate}%`} icon={Clock} subtitle="error + timeout" />
+          <StatCard title="Auto Handoff Rate" value={`${autoHandoffRate}%`} icon={ArrowUpRight} subtitle={`${autoHandoffs.length}/${filteredHandoffs.length || 0}`} />
+          <StatCard title="SLA Breaches" value={String(slaBreached.length)} icon={Clock} subtitle="pending + overdue" />
+          <StatCard title="User Escalations" value={String(userRequestedHandoffs.length)} icon={MessageSquare} subtitle="explicit human request" />
         </div>
 
         {/* Charts row 1 */}

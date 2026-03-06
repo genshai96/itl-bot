@@ -280,7 +280,7 @@ export function useToolCallLogs(tenantId?: string) {
         .from("tool_call_logs")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(200);
       if (tenantId) query = query.eq("tenant_id", tenantId);
       const { data, error } = await query;
       if (error) throw error;
@@ -297,7 +297,7 @@ export function useHandoffEvents(tenantId?: string) {
         .from("handoff_events")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(200);
       if (tenantId) query = query.eq("tenant_id", tenantId);
       const { data, error } = await query;
       if (error) throw error;
