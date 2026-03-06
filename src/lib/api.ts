@@ -33,7 +33,7 @@ export async function sendChatMessage({
   tenantId: string;
   message: string;
   conversationId?: string;
-  endUser?: { name?: string; email?: string; phone?: string };
+  endUser?: { name?: string; email?: string; phone?: string; role?: string };
   attachments?: Array<{ url: string; type: string; content?: string }>;
 }) {
   const { data, error } = await supabase.functions.invoke("chat", {
@@ -68,7 +68,7 @@ export async function sendChatMessageStream({
   tenantId: string;
   message: string;
   conversationId?: string;
-  endUser?: { name?: string; email?: string; phone?: string };
+  endUser?: { name?: string; email?: string; phone?: string; role?: string };
   attachments?: Array<{ url: string; type: string; content?: string }>;
   onToken: (token: string) => void;
   onDone: (result: { conversation_id: string; full_response: string; tool_used?: string; tool_latency_ms?: number }) => void;

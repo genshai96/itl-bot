@@ -16,6 +16,8 @@ interface WidgetConfig {
   collectName: boolean;
   collectEmail: boolean;
   collectPhone: boolean;
+  collectRole?: boolean;
+  roleOptions?: string[];
 }
 
 const defaultConfig: WidgetConfig = {
@@ -29,6 +31,8 @@ const defaultConfig: WidgetConfig = {
   collectName: true,
   collectEmail: true,
   collectPhone: false,
+  collectRole: false,
+  roleOptions: ["Người tạo đơn hàng", "Kế toán", "Quản lý"],
 };
 
 interface ChatMessage {
@@ -42,7 +46,7 @@ interface ChatMessage {
 const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<"info" | "chat">("info");
-  const [userInfo, setUserInfo] = useState({ name: "", email: "", phone: "" });
+  const [userInfo, setUserInfo] = useState({ name: "", email: "", phone: "", role: "" });
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: 1, role: "bot", content: config.welcomeMessage, time: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) },
   ]);
@@ -51,7 +55,7 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
 
-  const needsInfo = config.collectName || config.collectEmail || config.collectPhone;
+  const needsInfo = config.collectName || config.collectEmail || config.collectPhone || !!config.collectRole;
   const now = () => new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
   const handleSend = async () => {
@@ -115,7 +119,7 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
         tenantId: config.tenantId,
         message: msgText,
         conversationId,
-        endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone },
+        endUser: { name: userInfo.name, email: userInfo.email, phone: userInfo.phone, role: userInfo.role },
         attachments: processedAttachments.length > 0 ? processedAttachments : undefined,
       });
 
@@ -176,6 +180,25 @@ const ChatWidgetPreview = ({ config = defaultConfig }: { config?: WidgetConfig }
                   <label className="text-xs font-medium">Số điện thoại</label>
                   <input value={userInfo.phone} onChange={(e) => setUserInfo({ ...userInfo, phone: e.target.value })}
                     className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="0912 345 678" />
+                </div>
+              )}
+              {config.collectRole && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Vai trò / vị trí</label>
+                  <input
+                    list="widget-role-options"
+                    value={userInfo.role}
+                    onChange={(e) => setUserInfo({ ...userInfo, role: e.target.value })}
+                    className="w-full rounded-lg border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="VD: Người tạo đơn hàng, Kế toán, Quản lý"
+                  />
+                  {!!config.roleOptions?.length && (
+                    <datalist id="widget-role-options">
+                      {config.roleOptions.map((role) => (
+                        <option key={role} value={role} />
+                      ))}
+                    </datalist>
+                  )}
                 </div>
               )}
               <button onClick={() => setStep("chat")}

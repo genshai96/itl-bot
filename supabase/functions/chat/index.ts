@@ -1657,6 +1657,7 @@ serve(async (req) => {
           end_user_name: end_user?.name || null,
           end_user_email: end_user?.email || null,
           end_user_phone: end_user?.phone || null,
+          end_user_role: end_user?.role || null,
           status: "active",
         })
         .select("id, metadata")

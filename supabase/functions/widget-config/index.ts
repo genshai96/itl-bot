@@ -59,6 +59,8 @@ serve(async (req) => {
         widget_collect_name,
         widget_collect_email,
         widget_collect_phone,
+        widget_collect_role,
+        widget_role_options,
         widget_auto_open,
         widget_auto_open_delay,
         widget_show_powered_by

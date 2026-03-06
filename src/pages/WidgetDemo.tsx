@@ -171,6 +171,8 @@ Content-Type: application/json
           collectName: true,
           collectEmail: true,
           collectPhone: false,
+          collectRole: true,
+          roleOptions: ["Người tạo đơn hàng", "Kế toán", "Quản lý"],
         }}
       />
     </div>

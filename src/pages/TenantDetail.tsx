@@ -28,6 +28,7 @@ import {
   ArrowLeft, Brain, Code2, Copy, Check, FileText, Globe, Key,
   Palette, Save, Settings, Shield, Sliders, TestTube,
   Trash2, User, Loader2, CheckCircle2, Send, Bot, MessageSquare,
+  Rocket, ServerCog, Workflow,
 } from "lucide-react";
 
 const TenantDetail = () => {
@@ -53,12 +54,29 @@ const TenantDetail = () => {
   const [widgetConfig, setWidgetConfig] = useState({
     primaryColor: "#0d9488", position: "bottom-right" as "bottom-right" | "bottom-left",
     title: "AI Support", subtitle: "", placeholder: "", welcomeMessage: "",
-    collectName: true, collectEmail: true, collectPhone: false,
+    collectName: true, collectEmail: true, collectPhone: false, collectRole: false,
+    roleOptionsText: "Người tạo đơn hàng, Kế toán, Quản lý",
     showPoweredBy: true, autoOpen: false, autoOpenDelay: 5,
   });
   const [security, setSecurity] = useState({
     confidenceThreshold: 0.6, maxToolRetries: 2, piiMasking: true, promptInjectionDefense: true,
   });
+  const [agentCore, setAgentCore] = useState({
+    memoryV2Enabled: false,
+    skillsRuntimeEnabled: false,
+    mcpGatewayEnabled: false,
+    memoryDecayDays: 30,
+    memoryMinConfidence: 0.55,
+  });
+  const [bootstrapBody, setBootstrapBody] = useState("");
+  const [bootstrapLoading, setBootstrapLoading] = useState<"validate" | "bootstrap" | null>(null);
+  const [bootstrapResult, setBootstrapResult] = useState<any>(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<{
+    skills: any[];
+    mcpState: any[];
+    bootstrapRuns: any[];
+  }>({ skills: [], mcpState: [], bootstrapRuns: [] });
   const [systemPrompt, setSystemPrompt] = useState("");
   const [tenantName, setTenantName] = useState("");
   const [tenantDomain, setTenantDomain] = useState("");
@@ -97,6 +115,10 @@ const TenantDetail = () => {
         collectName: config.widget_collect_name ?? true,
         collectEmail: config.widget_collect_email ?? true,
         collectPhone: config.widget_collect_phone ?? false,
+        collectRole: (config as any).widget_collect_role ?? false,
+        roleOptionsText: Array.isArray((config as any).widget_role_options)
+          ? (config as any).widget_role_options.join(", ")
+          : "Người tạo đơn hàng, Kế toán, Quản lý",
         showPoweredBy: config.widget_show_powered_by ?? true,
         autoOpen: config.widget_auto_open ?? false,
         autoOpenDelay: config.widget_auto_open_delay ?? 5,
@@ -106,6 +128,13 @@ const TenantDetail = () => {
         maxToolRetries: config.max_tool_retries ?? 2,
         piiMasking: config.pii_masking ?? true,
         promptInjectionDefense: config.prompt_injection_defense ?? true,
+      });
+      setAgentCore({
+        memoryV2Enabled: (config as any).memory_v2_enabled ?? false,
+        skillsRuntimeEnabled: (config as any).skills_runtime_enabled ?? false,
+        mcpGatewayEnabled: (config as any).mcp_gateway_enabled ?? false,
+        memoryDecayDays: Number((config as any).memory_decay_days ?? 30),
+        memoryMinConfidence: Number((config as any).memory_min_confidence ?? 0.55),
       });
       setSystemPrompt(config.system_prompt || "");
     }
@@ -119,8 +148,38 @@ const TenantDetail = () => {
   }, [tenant]);
 
   useEffect(() => {
+    if (!tenantId) return;
+    setBootstrapBody(JSON.stringify({
+      tenant_id: tenantId,
+      mode: "bootstrap",
+      rollback_on_error: true,
+      memory: {
+        enable_v2: true,
+        decay_days: agentCore.memoryDecayDays,
+        min_confidence: agentCore.memoryMinConfidence,
+      },
+      skills: {
+        enable_runtime: true,
+        packs: [],
+      },
+      mcp: {
+        enable_gateway: true,
+        servers: [],
+      },
+      governance: {
+        confidence_threshold: security.confidenceThreshold,
+        max_tool_retries: security.maxToolRetries,
+        prompt_injection_defense: security.promptInjectionDefense,
+        pii_masking: security.piiMasking,
+      },
+    }, null, 2));
+  }, [tenantId]);
+
+  useEffect(() => {
     testEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [testMessages]);
+
+
 
   const fetchModels = async () => {
     if (!provider.endpoint || !provider.apiKey) { toast.error("Nhập endpoint và API key"); return; }
@@ -169,6 +228,11 @@ const TenantDetail = () => {
           widget_collect_name: widgetConfig.collectName,
           widget_collect_email: widgetConfig.collectEmail,
           widget_collect_phone: widgetConfig.collectPhone,
+          widget_collect_role: widgetConfig.collectRole,
+          widget_role_options: widgetConfig.roleOptionsText
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean),
           widget_show_powered_by: widgetConfig.showPoweredBy,
           widget_auto_open: widgetConfig.autoOpen,
           widget_auto_open_delay: widgetConfig.autoOpenDelay,
@@ -207,6 +271,91 @@ const TenantDetail = () => {
     } catch (err: any) { toast.error(err.message); }
     finally { setSaving(false); }
   };
+
+  const saveAgentCoreConfig = async () => {
+    if (!tenantId) return;
+    setSaving(true);
+    try {
+      await updateConfig.mutateAsync({
+        tenantId,
+        config: {
+          memory_v2_enabled: agentCore.memoryV2Enabled,
+          skills_runtime_enabled: agentCore.skillsRuntimeEnabled,
+          mcp_gateway_enabled: agentCore.mcpGatewayEnabled,
+          memory_decay_days: agentCore.memoryDecayDays,
+          memory_min_confidence: agentCore.memoryMinConfidence,
+        } as any,
+      });
+      toast.success("Đã lưu cấu hình Agent Core");
+    } catch (err: any) {
+      toast.error(err.message || "Lưu Agent Core thất bại");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runBootstrapAction = async (action: "validate" | "bootstrap") => {
+    if (!tenantId) return;
+    setBootstrapLoading(action);
+    try {
+      const parsed = JSON.parse(bootstrapBody || "{}");
+      parsed.tenant_id = tenantId;
+
+      const functionName = action === "validate" ? "bootstrap-validate" : "bootstrap";
+      if (action === "bootstrap") {
+        parsed.mode = "bootstrap";
+      }
+
+      const { data, error } = await supabase.functions.invoke(functionName, { body: parsed });
+      if (error) throw error;
+
+      setBootstrapResult(data);
+      toast.success(action === "validate" ? "Validate thành công" : "Bootstrap hoàn tất");
+      await loadRuntimeSnapshot();
+    } catch (err: any) {
+      toast.error(err.message || `Lỗi ${action}`);
+      setBootstrapResult({ ok: false, error: err.message || "Unknown error" });
+    } finally {
+      setBootstrapLoading(null);
+    }
+  };
+
+  const loadRuntimeSnapshot = async () => {
+    if (!tenantId) return;
+    setRuntimeLoading(true);
+    try {
+      const [{ data: skillsData }, { data: mcpData }, { data: runsData }] = await Promise.all([
+        supabase.functions.invoke("skills", {
+          body: { action: "list_tenant", tenant_id: tenantId },
+        }),
+        supabase.functions.invoke("mcp-gateway", {
+          body: { action: "state", tenant_id: tenantId },
+        }),
+        supabase
+          .from("tenant_bootstrap_runs" as any)
+          .select("id, mode, status, started_at, finished_at, error_message")
+          .eq("tenant_id", tenantId)
+          .order("created_at", { ascending: false })
+          .limit(8),
+      ]);
+
+      setRuntimeSnapshot({
+        skills: (skillsData as any)?.bindings || [],
+        mcpState: (mcpData as any)?.state || [],
+        bootstrapRuns: runsData || [],
+      });
+    } catch (err) {
+      console.error("Runtime snapshot error", err);
+    } finally {
+      setRuntimeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "agent-core" && tenantId) {
+      loadRuntimeSnapshot();
+    }
+  }, [activeTab, tenantId]);
 
   const handleDeleteTenant = async () => {
     if (!tenantId) return;
@@ -355,6 +504,8 @@ const TenantDetail = () => {
     collectName: ${widgetConfig.collectName},
     collectEmail: ${widgetConfig.collectEmail},
     collectPhone: ${widgetConfig.collectPhone},
+    collectRole: ${widgetConfig.collectRole},
+    roleOptions: ${JSON.stringify(widgetConfig.roleOptionsText.split(",").map((x) => x.trim()).filter(Boolean))},
     autoOpen: ${widgetConfig.autoOpen},
     autoOpenDelay: ${widgetConfig.autoOpenDelay},
   };
@@ -399,6 +550,7 @@ const TenantDetail = () => {
             <TabsTrigger value="widget" className="gap-2 text-xs"><Code2 className="h-3.5 w-3.5" />Widget & Embed</TabsTrigger>
             <TabsTrigger value="security" className="gap-2 text-xs"><Shield className="h-3.5 w-3.5" />Security</TabsTrigger>
             <TabsTrigger value="memory" className="gap-2 text-xs"><Brain className="h-3.5 w-3.5" />Memory & Skills</TabsTrigger>
+            <TabsTrigger value="agent-core" className="gap-2 text-xs"><Rocket className="h-3.5 w-3.5" />Agent Core</TabsTrigger>
             <TabsTrigger value="test" className="gap-2 text-xs"><MessageSquare className="h-3.5 w-3.5" />Test Chat</TabsTrigger>
           </TabsList>
 
@@ -587,12 +739,28 @@ const TenantDetail = () => {
                   <div className="space-y-2"><Label className="text-xs">Placeholder</Label><Input value={widgetConfig.placeholder} onChange={(e) => setWidgetConfig({ ...widgetConfig, placeholder: e.target.value })} className="h-10" maxLength={100} /></div>
                   <div className="space-y-3 pt-2">
                     <div className="flex items-center gap-2"><User className="h-4 w-4 text-primary" /><Label className="text-xs font-semibold">Thu thập thông tin End User</Label></div>
-                    {([{ key: "collectName" as const, label: "Họ tên" }, { key: "collectEmail" as const, label: "Email" }, { key: "collectPhone" as const, label: "SĐT" }]).map((f) => (
+                    {([
+                      { key: "collectName" as const, label: "Họ tên" },
+                      { key: "collectEmail" as const, label: "Email" },
+                      { key: "collectPhone" as const, label: "SĐT" },
+                      { key: "collectRole" as const, label: "Vai trò / vị trí" },
+                    ]).map((f) => (
                       <div key={f.key} className="flex items-center justify-between rounded-lg border px-3 py-2.5">
                         <span className="text-sm">{f.label}</span>
                         <Switch checked={widgetConfig[f.key]} onCheckedChange={(v) => setWidgetConfig({ ...widgetConfig, [f.key]: v })} />
                       </div>
                     ))}
+                    {widgetConfig.collectRole && (
+                      <div className="space-y-2 rounded-lg border px-3 py-3">
+                        <Label className="text-xs">Danh sách vai trò gợi ý (phân tách bằng dấu phẩy)</Label>
+                        <Input
+                          value={widgetConfig.roleOptionsText}
+                          onChange={(e) => setWidgetConfig({ ...widgetConfig, roleOptionsText: e.target.value })}
+                          className="h-9 text-xs"
+                          placeholder="Người tạo đơn hàng, Kế toán, Quản lý"
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2 pt-2">
                     <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
@@ -684,6 +852,166 @@ const TenantDetail = () => {
           {/* Memory & Skills */}
           <TabsContent value="memory" className="space-y-6">
             {tenantId && <BotMemoryPanel tenantId={tenantId} compact />}
+          </TabsContent>
+
+          {/* Agent Core */}
+          <TabsContent value="agent-core" className="space-y-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="rounded-lg border bg-card p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10"><Workflow className="h-5 w-5 text-primary" /></div>
+                  <div>
+                    <h3 className="text-sm font-semibold">Agent Runtime Flags</h3>
+                    <p className="text-xs text-muted-foreground">Bật/tắt memory v2, skills runtime, MCP gateway</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Memory v2</p>
+                      <p className="text-[11px] text-muted-foreground">Automatic extraction/recall/decay</p>
+                    </div>
+                    <Switch checked={agentCore.memoryV2Enabled} onCheckedChange={(v) => setAgentCore((s) => ({ ...s, memoryV2Enabled: v }))} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Skills Runtime</p>
+                      <p className="text-[11px] text-muted-foreground">Tenant skill bindings + trigger routing</p>
+                    </div>
+                    <Switch checked={agentCore.skillsRuntimeEnabled} onCheckedChange={(v) => setAgentCore((s) => ({ ...s, skillsRuntimeEnabled: v }))} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">MCP Gateway</p>
+                      <p className="text-[11px] text-muted-foreground">Circuit breaker + policy-governed tool route</p>
+                    </div>
+                    <Switch checked={agentCore.mcpGatewayEnabled} onCheckedChange={(v) => setAgentCore((s) => ({ ...s, mcpGatewayEnabled: v }))} />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Memory Decay (days)</Label>
+                    <Input type="number" min={1} max={365} value={agentCore.memoryDecayDays} onChange={(e) => setAgentCore((s) => ({ ...s, memoryDecayDays: Number(e.target.value) || 30 }))} className="h-10 font-mono text-sm" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Memory Min Confidence</Label>
+                    <Input type="number" step="0.01" min={0} max={1} value={agentCore.memoryMinConfidence} onChange={(e) => setAgentCore((s) => ({ ...s, memoryMinConfidence: Number(e.target.value) || 0.55 }))} className="h-10 font-mono text-sm" />
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button size="sm" className="gap-2 glow-primary" onClick={saveAgentCoreConfig} disabled={saving}>
+                    {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    Lưu Agent Core
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-card p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10"><ServerCog className="h-5 w-5 text-info" /></div>
+                  <div>
+                    <h3 className="text-sm font-semibold">Bootstrap Automation</h3>
+                    <p className="text-xs text-muted-foreground">Validate/Bootstrap tenant runtime (phase 6)</p>
+                  </div>
+                </div>
+
+                <Textarea
+                  value={bootstrapBody}
+                  onChange={(e) => setBootstrapBody(e.target.value)}
+                  rows={16}
+                  className="font-mono text-xs"
+                />
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => runBootstrapAction("validate")}
+                    disabled={bootstrapLoading !== null}
+                  >
+                    {bootstrapLoading === "validate" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                    Validate
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-2 glow-primary"
+                    onClick={() => runBootstrapAction("bootstrap")}
+                    disabled={bootstrapLoading !== null}
+                  >
+                    {bootstrapLoading === "bootstrap" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
+                    Bootstrap
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="rounded-lg border bg-card p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold">Skills Runtime</h4>
+                  <span className="text-xs text-muted-foreground">{runtimeSnapshot.skills.length} bindings</span>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {runtimeSnapshot.skills.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Chưa có tenant skill bindings</p>
+                  ) : runtimeSnapshot.skills.map((b: any) => (
+                    <div key={b.id} className="rounded border px-3 py-2 text-xs">
+                      <p className="font-medium">{b.skills_registry?.name || b.skills_registry?.skill_id || "Unknown"}</p>
+                      <p className="text-muted-foreground">status: {b.status} · version: {b.pinned_version || b.skills_registry?.version || "-"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-card p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold">MCP Runtime State</h4>
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={loadRuntimeSnapshot} disabled={runtimeLoading}>
+                    {runtimeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Refresh"}
+                  </Button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {runtimeSnapshot.mcpState.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Chưa có state (chưa chạy tool qua MCP)</p>
+                  ) : runtimeSnapshot.mcpState.map((s: any) => (
+                    <div key={s.id} className="rounded border px-3 py-2 text-xs">
+                      <p className="font-medium">circuit: {s.circuit_state}</p>
+                      <p className="text-muted-foreground">failures: {s.failure_count} · last_health: {s.last_health_status || "-"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-card p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold">Bootstrap Runs</h4>
+                  <span className="text-xs text-muted-foreground">{runtimeSnapshot.bootstrapRuns.length} recent</span>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {runtimeSnapshot.bootstrapRuns.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Chưa có lịch sử bootstrap</p>
+                  ) : runtimeSnapshot.bootstrapRuns.map((r: any) => (
+                    <div key={r.id} className="rounded border px-3 py-2 text-xs">
+                      <p className="font-medium">{r.mode} · {r.status}</p>
+                      <p className="text-muted-foreground">{format(new Date(r.started_at), "dd/MM HH:mm")}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {bootstrapResult && (
+              <div className="rounded-lg border bg-card p-6 space-y-3">
+                <h4 className="text-sm font-semibold">Bootstrap Result</h4>
+                <pre className="rounded-lg bg-muted p-4 text-xs font-mono overflow-x-auto max-h-80 overflow-y-auto">
+                  {JSON.stringify(bootstrapResult, null, 2)}
+                </pre>
+              </div>
+            )}
           </TabsContent>
 
           {/* Test Chat */}
