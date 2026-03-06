@@ -681,6 +681,11 @@ const TenantDetail = () => {
             </div>
           </TabsContent>
 
+          {/* Memory & Skills */}
+          <TabsContent value="memory" className="space-y-6">
+            {tenantId && <BotMemoryPanel tenantId={tenantId} compact />}
+          </TabsContent>
+
           {/* Test Chat */}
           <TabsContent value="test" className="space-y-6">
             <div className="rounded-lg border bg-card overflow-hidden">
