@@ -443,6 +443,7 @@ async function callLLM(
   ragSources: string[],
   flowSystemAddition: string,
   enabledTools: any[] | null,
+  memoryContext?: string,
 ): Promise<{ content: string; tool_used?: string; tool_latency_ms?: number }> {
   const providerEndpoint = tenantConfig.provider_endpoint;
   const providerApiKey = tenantConfig.provider_api_key;
@@ -456,6 +457,10 @@ async function callLLM(
     `You are an AI support assistant. Be helpful, concise, and professional.`;
 
   systemPrompt += RESPONSE_FORMAT_INSTRUCTIONS;
+
+  if (memoryContext) {
+    systemPrompt += `\n\n--- BOT MEMORY (Rules, Corrections, Facts, Personality) ---\n${memoryContext}\n--- END MEMORY ---`;
+  }
 
   if (ragContext) {
     systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\n${ragContext}\n--- END CONTEXT ---`;
