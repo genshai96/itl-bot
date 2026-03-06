@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
-import { Search, Send, Bot, User, ArrowUpRight, Tag, X, Plus, Filter } from "lucide-react";
+import { Search, Send, Bot, User, ArrowUpRight, Tag, X, Plus, Filter, Database } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format, isAfter, subDays } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { MessageCorrectionButton } from "@/components/chat/MessageCorrectionButton";
+import { IngestConversationButton } from "@/components/chat/IngestConversationButton";
 
 const statusColors: Record<string, string> = {
   active: "bg-success",
@@ -244,6 +246,13 @@ const Conversations = () => {
                     <Button variant="outline" size="sm" className="text-xs" onClick={resolveConversation}>
                       Resolve
                     </Button>
+                  )}
+                  {messages && messages.length > 0 && (
+                    <IngestConversationButton
+                      conversationId={selectedConv.id}
+                      tenantId={selectedConv.tenant_id}
+                      messages={messages}
+                    />
                   )}
                   <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleHandoff}>
                     <ArrowUpRight className="h-3.5 w-3.5" />
