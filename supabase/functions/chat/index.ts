@@ -893,6 +893,7 @@ serve(async (req) => {
         ? "\n\nNote: The user uploaded files imported to knowledge base. Use context above."
         : "",
       enabledTools,
+      memoryContext,
     );
 
     // Save bot response
