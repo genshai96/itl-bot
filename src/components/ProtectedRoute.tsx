@@ -1,9 +1,12 @@
 import { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
+import { useHighestRole } from "@/hooks/use-current-roles";
 
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
+  const highestRole = useHighestRole();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -15,6 +18,26 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Role-based route protection
+  if (highestRole) {
+    const restrictedRoutes: Record<string, string[]> = {
+      support_agent: ["/conversations", "/handoff"],
+      support_lead: ["/", "/conversations", "/handoff", "/knowledge", "/agents", "/analytics"],
+    };
+
+    const allowedPaths = restrictedRoutes[highestRole];
+    if (allowedPaths) {
+      const currentPath = location.pathname;
+      const isAllowed = allowedPaths.some(
+        (p) => currentPath === p || (p !== "/" && currentPath.startsWith(p))
+      );
+      if (!isAllowed) {
+        const defaultPath = highestRole === "support_agent" ? "/handoff" : "/";
+        return <Navigate to={defaultPath} replace />;
+      }
+    }
   }
 
   return <>{children}</>;
