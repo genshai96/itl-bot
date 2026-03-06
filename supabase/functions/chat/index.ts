@@ -763,12 +763,39 @@ serve(async (req) => {
       console.warn("RAG search failed:", ragErr);
     }
 
-    // 6. Get enabled tools
+     // 6. Get enabled tools
     const { data: enabledTools } = await supabase
       .from("tool_definitions")
       .select("*")
       .eq("tenant_id", tenant_id)
       .eq("enabled", true);
+
+    // 7. Get bot memory (rules, corrections, facts, personality, constraints)
+    let memoryContext = "";
+    try {
+      const { data: memoryEntries } = await supabase
+        .from("bot_memory")
+        .select("category, title, content")
+        .eq("tenant_id", tenant_id)
+        .eq("enabled", true)
+        .order("priority", { ascending: false })
+        .limit(50);
+
+      if (memoryEntries?.length) {
+        const grouped: Record<string, string[]> = {};
+        for (const entry of memoryEntries) {
+          const cat = entry.category || "rule";
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(`- ${entry.title}: ${entry.content}`);
+        }
+        const sections = Object.entries(grouped)
+          .map(([cat, items]) => `[${cat.toUpperCase()}]\n${items.join("\n")}`)
+          .join("\n\n");
+        memoryContext = sections;
+      }
+    } catch (e) {
+      console.warn("Failed to load bot memory:", e);
+    }
 
     // ==================== FLOW ENGINE ====================
     // Check if tenant has an active published flow
