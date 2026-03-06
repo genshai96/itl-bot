@@ -227,10 +227,12 @@ export type Database = {
           assigned_to: string | null
           conversation_id: string
           created_at: string
+          first_response_at: string | null
           id: string
           priority: string
           reason: string
           resolved_at: string | null
+          sla_deadline_at: string | null
           status: string
           tenant_id: string
         }
@@ -238,10 +240,12 @@ export type Database = {
           assigned_to?: string | null
           conversation_id: string
           created_at?: string
+          first_response_at?: string | null
           id?: string
           priority?: string
           reason: string
           resolved_at?: string | null
+          sla_deadline_at?: string | null
           status?: string
           tenant_id: string
         }
@@ -249,10 +253,12 @@ export type Database = {
           assigned_to?: string | null
           conversation_id?: string
           created_at?: string
+          first_response_at?: string | null
           id?: string
           priority?: string
           reason?: string
           resolved_at?: string | null
+          sla_deadline_at?: string | null
           status?: string
           tenant_id?: string
         }
@@ -412,6 +418,53 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: string
+          is_read: boolean
+          resource_id: string | null
+          resource_type: string | null
+          tenant_id: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          resource_id?: string | null
+          resource_type?: string | null
+          tenant_id?: string | null
+          title: string
+          type?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          resource_id?: string | null
+          resource_type?: string | null
+          tenant_id?: string | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -453,6 +506,8 @@ export type Database = {
           provider_api_key: string | null
           provider_endpoint: string | null
           provider_model: string | null
+          sla_resolution_minutes: number | null
+          sla_response_minutes: number | null
           system_prompt: string | null
           temperature: number | null
           tenant_id: string
@@ -484,6 +539,8 @@ export type Database = {
           provider_api_key?: string | null
           provider_endpoint?: string | null
           provider_model?: string | null
+          sla_resolution_minutes?: number | null
+          sla_response_minutes?: number | null
           system_prompt?: string | null
           temperature?: number | null
           tenant_id: string
@@ -515,6 +572,8 @@ export type Database = {
           provider_api_key?: string | null
           provider_endpoint?: string | null
           provider_model?: string | null
+          sla_resolution_minutes?: number | null
+          sla_response_minutes?: number | null
           system_prompt?: string | null
           temperature?: number | null
           tenant_id?: string
