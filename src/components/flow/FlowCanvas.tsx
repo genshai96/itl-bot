@@ -134,7 +134,7 @@ function ToolNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
 
 function HandoffNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
   return (
-    <div className={`rounded-xl border-2 px-4 py-3 min-w-[180px] shadow-md transition-shadow ${
+    <div className={`rounded-xl border-2 px-4 py-3 min-w-[180px] max-w-[260px] shadow-md transition-shadow ${
       selected ? "border-primary shadow-lg shadow-destructive/20" : "border-destructive/50"
     } bg-card`}>
       <Handle type="target" position={Position.Top} className="!bg-destructive !w-3 !h-3 !border-2 !border-card" />
@@ -147,6 +147,12 @@ function HandoffNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
       <p className="text-xs font-medium truncate">{data.label}</p>
       {data.priority && (
         <Badge variant="secondary" className="text-[9px] mt-1">{data.priority} priority</Badge>
+      )}
+      {data.assignTeam && data.assignTeam !== "any" && (
+        <Badge variant="outline" className="text-[9px] mt-1 ml-1">{data.assignTeam}</Badge>
+      )}
+      {data.handoffConditions && (
+        <p className="text-[9px] text-muted-foreground mt-1 line-clamp-1">⚡ {data.handoffConditions}</p>
       )}
     </div>
   );
