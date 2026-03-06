@@ -24,7 +24,7 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   if (highestRole) {
     const restrictedRoutes: Record<string, string[]> = {
       support_agent: ["/conversations", "/handoff"],
-      support_lead: ["/", "/conversations", "/handoff", "/knowledge", "/agents", "/analytics"],
+      support_lead: ["/", "/conversations", "/handoff", "/knowledge", "/agents", "/analytics", "/bot-memory"],
     };
 
     const allowedPaths = restrictedRoutes[highestRole];

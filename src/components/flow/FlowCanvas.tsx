@@ -46,6 +46,10 @@ type FlowNodeData = {
   toolId?: string;
   intent?: string;
   priority?: string;
+  handoffMessage?: string;
+  handoffConditions?: string;
+  assignTeam?: string;
+  autoAssign?: boolean;
 };
 
 function TriggerNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
@@ -130,7 +134,7 @@ function ToolNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
 
 function HandoffNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
   return (
-    <div className={`rounded-xl border-2 px-4 py-3 min-w-[180px] shadow-md transition-shadow ${
+    <div className={`rounded-xl border-2 px-4 py-3 min-w-[180px] max-w-[260px] shadow-md transition-shadow ${
       selected ? "border-primary shadow-lg shadow-destructive/20" : "border-destructive/50"
     } bg-card`}>
       <Handle type="target" position={Position.Top} className="!bg-destructive !w-3 !h-3 !border-2 !border-card" />
@@ -143,6 +147,12 @@ function HandoffNode({ data, selected }: NodeProps<Node<FlowNodeData>>) {
       <p className="text-xs font-medium truncate">{data.label}</p>
       {data.priority && (
         <Badge variant="secondary" className="text-[9px] mt-1">{data.priority} priority</Badge>
+      )}
+      {data.assignTeam && data.assignTeam !== "any" && (
+        <Badge variant="outline" className="text-[9px] mt-1 ml-1">{data.assignTeam}</Badge>
+      )}
+      {data.handoffConditions && (
+        <p className="text-[9px] text-muted-foreground mt-1 line-clamp-1">⚡ {data.handoffConditions}</p>
       )}
     </div>
   );
@@ -504,21 +514,63 @@ export default function FlowCanvas({ initialConfig, onConfigChange, onValidate }
               )}
 
               {selectedNode.type === "handoff" && (
-                <div className="space-y-2">
-                  <Label className="text-xs">Priority</Label>
-                  <Select
-                    value={selectedNode.data.priority || "normal"}
-                    onValueChange={(v) => updateNodeData("priority", v)}
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="normal">Normal</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Priority</Label>
+                    <Select
+                      value={selectedNode.data.priority || "normal"}
+                      onValueChange={(v) => updateNodeData("priority", v)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs">Tin nhắn gửi khách</Label>
+                    <Textarea
+                      value={selectedNode.data.handoffMessage || ""}
+                      onChange={(e) => updateNodeData("handoffMessage", e.target.value)}
+                      placeholder="Tôi sẽ chuyển bạn cho nhân viên hỗ trợ..."
+                      className="text-xs"
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs">Điều kiện handoff (tùy chọn)</Label>
+                    <Textarea
+                      value={selectedNode.data.handoffConditions || ""}
+                      onChange={(e) => updateNodeData("handoffConditions", e.target.value)}
+                      placeholder="VD: confidence < 0.5, sentiment negative, keyword: refund..."
+                      className="text-xs font-mono"
+                      rows={2}
+                    />
+                    <p className="text-[10px] text-muted-foreground">Mô tả điều kiện để AI đánh giá khi nào cần handoff</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs">Assign Team / Role</Label>
+                    <Select
+                      value={selectedNode.data.assignTeam || "any"}
+                      onValueChange={(v) => updateNodeData("assignTeam", v)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="any">Bất kỳ operator</SelectItem>
+                        <SelectItem value="support_lead">Support Lead</SelectItem>
+                        <SelectItem value="support_agent">Support Agent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
 

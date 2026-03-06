@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
-import { Search, Send, Bot, User, ArrowUpRight, Tag, X, Plus, Filter } from "lucide-react";
+import { Search, Send, Bot, User, ArrowUpRight, Tag, X, Plus, Filter, Database } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format, isAfter, subDays } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { MessageCorrectionButton } from "@/components/chat/MessageCorrectionButton";
+import { IngestConversationButton } from "@/components/chat/IngestConversationButton";
 
 const statusColors: Record<string, string> = {
   active: "bg-success",
@@ -245,6 +247,13 @@ const Conversations = () => {
                       Resolve
                     </Button>
                   )}
+                  {messages && messages.length > 0 && (
+                    <IngestConversationButton
+                      conversationId={selectedConv.id}
+                      tenantId={selectedConv.tenant_id}
+                      messages={messages}
+                    />
+                  )}
                   <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleHandoff}>
                     <ArrowUpRight className="h-3.5 w-3.5" />
                     Handoff
@@ -315,6 +324,19 @@ const Conversations = () => {
                           <span className="px-1.5 py-0.5 rounded bg-warning/10 text-warning font-mono">
                             👤 manual
                           </span>
+                        )}
+                        {msg.role !== "user" && !(msg.metadata as any)?.manual_reply && selectedConv && (
+                          <MessageCorrectionButton
+                            messageId={msg.id}
+                            conversationId={selectedConv.id}
+                            tenantId={selectedConv.tenant_id}
+                            originalContent={msg.content}
+                            userQuestion={(() => {
+                              const idx = messages?.findIndex((m) => m.id === msg.id) || 0;
+                              const prev = messages?.[idx - 1];
+                              return prev?.role === "user" ? prev.content : undefined;
+                            })()}
+                          />
                         )}
                       </div>
                       {msg.sources && Array.isArray(msg.sources) && (msg.sources as string[]).length > 0 && (

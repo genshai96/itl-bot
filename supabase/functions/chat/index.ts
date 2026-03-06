@@ -343,24 +343,62 @@ async function executeFlow(
       }
 
       case "handoff": {
-        // Create handoff event
+        // Create handoff event with dynamic config
         const priority = currentNode.data?.priority || "normal";
         const reason = currentNode.data?.label || "Flow-triggered handoff";
+        const handoffMessage = currentNode.data?.handoffMessage || 
+          `Tôi sẽ chuyển bạn cho nhân viên hỗ trợ. Lý do: ${reason}. Vui lòng đợi trong giây lát.`;
+        const assignTeam = currentNode.data?.assignTeam || "any";
+
+        // Check handoff conditions if specified
+        const handoffConditions = currentNode.data?.handoffConditions;
+        if (handoffConditions) {
+          const shouldHandoff = await evaluateCondition(
+            tenantConfig,
+            chatMessages,
+            handoffConditions,
+            currentState.context,
+          );
+          if (!shouldHandoff) {
+            // Conditions not met, skip handoff and advance
+            const next = getNextNode(nodes, edges, currentNode.id);
+            currentNode = next;
+            continue;
+          }
+        }
+
+        // Find assignee based on team/role preference
+        let assignedTo: string | null = null;
+        if (assignTeam && assignTeam !== "any") {
+          const { data: agents } = await supabase
+            .from("user_roles")
+            .select("user_id")
+            .eq("tenant_id", tenantConfig.tenant_id)
+            .eq("role", assignTeam)
+            .limit(1);
+          if (agents?.length) {
+            assignedTo = agents[0].user_id;
+          }
+        }
 
         await supabase.from("handoff_events").insert({
           tenant_id: tenantConfig.tenant_id,
           conversation_id: convId,
           priority,
           reason,
-          status: "pending",
+          status: assignedTo ? "assigned" : "pending",
+          assigned_to: assignedTo,
         });
 
-        await supabase.from("conversations").update({ status: "handoff" }).eq("id", convId);
+        await supabase.from("conversations").update({ 
+          status: "handoff",
+          assigned_agent_id: assignedTo,
+        }).eq("id", convId);
 
         return {
-          response: `Tôi sẽ chuyển bạn cho nhân viên hỗ trợ. Lý do: ${reason}. Vui lòng đợi trong giây lát.`,
+          response: handoffMessage,
           handoff: { priority, reason },
-          new_state: null, // flow ends
+          new_state: null,
           sources: ragSources,
         };
       }
@@ -443,6 +481,7 @@ async function callLLM(
   ragSources: string[],
   flowSystemAddition: string,
   enabledTools: any[] | null,
+  memoryContext?: string,
 ): Promise<{ content: string; tool_used?: string; tool_latency_ms?: number }> {
   const providerEndpoint = tenantConfig.provider_endpoint;
   const providerApiKey = tenantConfig.provider_api_key;
@@ -456,6 +495,10 @@ async function callLLM(
     `You are an AI support assistant. Be helpful, concise, and professional.`;
 
   systemPrompt += RESPONSE_FORMAT_INSTRUCTIONS;
+
+  if (memoryContext) {
+    systemPrompt += `\n\n--- BOT MEMORY (Rules, Corrections, Facts, Personality) ---\n${memoryContext}\n--- END MEMORY ---`;
+  }
 
   if (ragContext) {
     systemPrompt += `\n\n--- KNOWLEDGE BASE CONTEXT ---\n${ragContext}\n--- END CONTEXT ---`;
@@ -758,12 +801,39 @@ serve(async (req) => {
       console.warn("RAG search failed:", ragErr);
     }
 
-    // 6. Get enabled tools
+     // 6. Get enabled tools
     const { data: enabledTools } = await supabase
       .from("tool_definitions")
       .select("*")
       .eq("tenant_id", tenant_id)
       .eq("enabled", true);
+
+    // 7. Get bot memory (rules, corrections, facts, personality, constraints)
+    let memoryContext = "";
+    try {
+      const { data: memoryEntries } = await supabase
+        .from("bot_memory")
+        .select("category, title, content")
+        .eq("tenant_id", tenant_id)
+        .eq("enabled", true)
+        .order("priority", { ascending: false })
+        .limit(50);
+
+      if (memoryEntries?.length) {
+        const grouped: Record<string, string[]> = {};
+        for (const entry of memoryEntries) {
+          const cat = entry.category || "rule";
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(`- ${entry.title}: ${entry.content}`);
+        }
+        const sections = Object.entries(grouped)
+          .map(([cat, items]) => `[${cat.toUpperCase()}]\n${items.join("\n")}`)
+          .join("\n\n");
+        memoryContext = sections;
+      }
+    } catch (e) {
+      console.warn("Failed to load bot memory:", e);
+    }
 
     // ==================== FLOW ENGINE ====================
     // Check if tenant has an active published flow
@@ -861,6 +931,7 @@ serve(async (req) => {
         ? "\n\nNote: The user uploaded files imported to knowledge base. Use context above."
         : "",
       enabledTools,
+      memoryContext,
     );
 
     // Save bot response
