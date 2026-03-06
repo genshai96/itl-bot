@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import { useHandoffEvents, useMessages } from "@/hooks/use-data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { AgentAssignSelect } from "@/components/handoff/AgentAssignSelect";
+import { SlaTimer } from "@/components/handoff/SlaTimer";
 import {
   ArrowUpRight,
   Bot,
@@ -14,6 +19,8 @@ import {
   User,
   AlertTriangle,
   MessageSquare,
+  UserCircle,
+  Filter,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -31,25 +38,25 @@ const statusIcons: Record<string, typeof Clock> = {
 };
 
 const HandoffQueue = () => {
+  const { user } = useAuth();
   const { data: handoffs, refetch: refetchHandoffs } = useHandoffEvents();
   const [selectedHandoff, setSelectedHandoff] = useState<string | null>(null);
   const [inputMsg, setInputMsg] = useState("");
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "assigned" | "resolved">("all");
+  const [onlyMine, setOnlyMine] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selected = handoffs?.find((h) => h.id === selectedHandoff);
   const conversationId = selected?.conversation_id;
   const { data: messages, refetch: refetchMessages } = useMessages(conversationId || "");
 
-  // Auto-select first handoff
   useEffect(() => {
     if (handoffs?.length && !selectedHandoff) {
       setSelectedHandoff(handoffs[0].id);
     }
   }, [handoffs, selectedHandoff]);
 
-  // Realtime for new handoff events
   useEffect(() => {
     const channel = supabase
       .channel("handoff-realtime")
@@ -60,7 +67,6 @@ const HandoffQueue = () => {
     return () => { supabase.removeChannel(channel); };
   }, [refetchHandoffs]);
 
-  // Realtime for messages in selected conversation
   useEffect(() => {
     if (!conversationId) return;
     const channel = supabase
@@ -72,7 +78,6 @@ const HandoffQueue = () => {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId, refetchMessages]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -90,6 +95,7 @@ const HandoffQueue = () => {
       if (error) throw error;
       setInputMsg("");
       refetchMessages();
+      refetchHandoffs(); // refresh to get updated first_response_at
     } catch (err) {
       toast.error("Gửi tin nhắn thất bại");
     } finally {
@@ -106,11 +112,19 @@ const HandoffQueue = () => {
       toast.error("Không thể resolve");
     } else {
       toast.success("Đã resolve handoff");
+      await supabase.from("conversations").update({ status: "resolved" }).eq("id", conversationId);
       refetchHandoffs();
     }
   };
 
-  const filteredHandoffs = handoffs?.filter((h) => filter === "all" || h.status === filter) || [];
+  const filteredHandoffs = (handoffs || []).filter((h) => {
+    if (filter !== "all" && h.status !== filter) return false;
+    if (onlyMine && h.assigned_to !== user?.id) return false;
+    return true;
+  });
+
+  const pendingCount = handoffs?.filter((h) => h.status === "pending").length || 0;
+  const assignedToMeCount = handoffs?.filter((h) => h.assigned_to === user?.id && h.status !== "resolved").length || 0;
 
   return (
     <AdminLayout>
@@ -121,12 +135,14 @@ const HandoffQueue = () => {
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-warning" />
               <h2 className="text-base font-semibold">Handoff Queue</h2>
-              {handoffs?.filter((h) => h.status === "pending").length ? (
+              {pendingCount > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold text-destructive-foreground">
-                  {handoffs.filter((h) => h.status === "pending").length}
+                  {pendingCount}
                 </span>
-              ) : null}
+              )}
             </div>
+
+            {/* Status filters */}
             <div className="flex gap-1.5">
               {(["all", "pending", "assigned", "resolved"] as const).map((f) => (
                 <button
@@ -141,6 +157,19 @@ const HandoffQueue = () => {
                   {f === "all" ? "Tất cả" : f === "pending" ? "Chờ" : f === "assigned" ? "Đã nhận" : "Resolved"}
                 </button>
               ))}
+            </div>
+
+            {/* My assignments filter */}
+            <div className="flex items-center gap-2">
+              <Switch
+                id="only-mine"
+                checked={onlyMine}
+                onCheckedChange={setOnlyMine}
+                className="scale-[0.7]"
+              />
+              <Label htmlFor="only-mine" className="text-[11px] text-muted-foreground cursor-pointer">
+                Chỉ của tôi ({assignedToMeCount})
+              </Label>
             </div>
           </div>
 
@@ -173,9 +202,25 @@ const HandoffQueue = () => {
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{h.reason}</p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono truncate">
-                        {h.conversation_id.slice(0, 8)}...
-                      </p>
+                      
+                      {/* SLA Timer */}
+                      <div className="mt-1">
+                        <SlaTimer
+                          createdAt={h.created_at}
+                          slaDeadlineAt={(h as any).sla_deadline_at}
+                          firstResponseAt={(h as any).first_response_at}
+                          resolvedAt={h.resolved_at}
+                          compact
+                        />
+                      </div>
+
+                      {/* Assigned indicator */}
+                      {h.assigned_to && (
+                        <div className="flex items-center gap-1 mt-1 text-[10px] text-info">
+                          <UserCircle className="h-3 w-3" />
+                          <span>{h.assigned_to === user?.id ? "Assigned to me" : "Assigned"}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </button>
@@ -202,6 +247,24 @@ const HandoffQueue = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* SLA Status */}
+                  <SlaTimer
+                    createdAt={selected.created_at}
+                    slaDeadlineAt={(selected as any).sla_deadline_at}
+                    firstResponseAt={(selected as any).first_response_at}
+                    resolvedAt={selected.resolved_at}
+                  />
+
+                  {/* Assign Agent */}
+                  {selected.status !== "resolved" && (
+                    <AgentAssignSelect
+                      handoffId={selected.id}
+                      tenantId={selected.tenant_id}
+                      currentAssignee={selected.assigned_to}
+                      onAssigned={refetchHandoffs}
+                    />
+                  )}
+
                   <Badge variant={selected.status === "pending" ? "destructive" : selected.status === "resolved" ? "secondary" : "default"}>
                     {selected.status}
                   </Badge>
