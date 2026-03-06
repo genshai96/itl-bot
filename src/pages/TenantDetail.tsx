@@ -19,6 +19,7 @@ import {
   useKbDocuments, useToolDefinitions, useConversations, useDeleteTenant,
 } from "@/hooks/use-data";
 import ToolManager from "@/components/tools/ToolManager";
+import BotMemoryPanel from "@/components/memory/BotMemoryPanel";
 import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 import { ChatFileUpload, type ChatAttachment } from "@/components/chat/ChatFileUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -397,6 +398,7 @@ const TenantDetail = () => {
             <TabsTrigger value="knowledge" className="gap-2 text-xs"><FileText className="h-3.5 w-3.5" />Knowledge Base</TabsTrigger>
             <TabsTrigger value="widget" className="gap-2 text-xs"><Code2 className="h-3.5 w-3.5" />Widget & Embed</TabsTrigger>
             <TabsTrigger value="security" className="gap-2 text-xs"><Shield className="h-3.5 w-3.5" />Security</TabsTrigger>
+            <TabsTrigger value="memory" className="gap-2 text-xs"><Brain className="h-3.5 w-3.5" />Memory & Skills</TabsTrigger>
             <TabsTrigger value="test" className="gap-2 text-xs"><MessageSquare className="h-3.5 w-3.5" />Test Chat</TabsTrigger>
           </TabsList>
 
@@ -677,6 +679,11 @@ const TenantDetail = () => {
                 </Button>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Memory & Skills */}
+          <TabsContent value="memory" className="space-y-6">
+            {tenantId && <BotMemoryPanel tenantId={tenantId} compact />}
           </TabsContent>
 
           {/* Test Chat */}
