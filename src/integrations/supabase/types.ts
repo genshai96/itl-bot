@@ -58,6 +58,76 @@ export type Database = {
           },
         ]
       }
+      bot_memory: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          id: string
+          metadata: Json | null
+          priority: number
+          source_conversation_id: string | null
+          source_message_id: string | null
+          tenant_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          content: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          metadata?: Json | null
+          priority?: number
+          source_conversation_id?: string | null
+          source_message_id?: string | null
+          tenant_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          metadata?: Json | null
+          priority?: number
+          source_conversation_id?: string | null
+          source_message_id?: string | null
+          tenant_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_memory_source_conversation_id_fkey"
+            columns: ["source_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bot_memory_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bot_memory_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversation_labels: {
         Row: {
           auto_labeled: boolean | null
