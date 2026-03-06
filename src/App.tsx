@@ -19,6 +19,7 @@ import AuditLogs from "./pages/AuditLogs";
 import WidgetDemo from "./pages/WidgetDemo";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import StaffLogin from "./pages/StaffLogin";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/staff-login" element={<StaffLogin />} />
             <Route path="/widget-demo" element={<WidgetDemo />} />
 
             {/* Protected routes */}
