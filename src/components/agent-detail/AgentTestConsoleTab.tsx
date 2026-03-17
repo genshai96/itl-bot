@@ -64,14 +64,22 @@ export const AgentTestConsoleTab = ({
             <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : ""}`}>
               {msg.role !== "user" && (
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-1">
-                  <Bot className="h-4 w-4 text-primary" />
+                  {msg.role === "bot" && !msg.content && testSending ? (
+                    <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                  ) : (
+                    <Bot className="h-4 w-4 text-primary" />
+                  )}
                 </div>
               )}
               <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
                 {msg.imageUrls?.map((url, j) => (
                   <img key={j} src={url} alt="" className="rounded-lg max-w-full max-h-32 mb-2 border" />
                 ))}
-                <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
+                {msg.role === "bot" && !msg.content && testSending ? (
+                  <p className="text-sm text-muted-foreground">Đang trả lời...</p>
+                ) : (
+                  <ChatMessageRenderer content={msg.content} role={msg.role === "bot" ? "bot" : "user"} />
+                )}
               </div>
               {msg.role === "user" && (
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary mt-1">
@@ -80,16 +88,6 @@ export const AgentTestConsoleTab = ({
               )}
             </div>
           ))}
-          {testSending && (
-            <div className="flex gap-3">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-1">
-                <Loader2 className="h-4 w-4 text-primary animate-spin" />
-              </div>
-              <div className="chat-bubble-bot">
-                <p className="text-sm text-muted-foreground">Đang trả lời...</p>
-              </div>
-            </div>
-          )}
           <div ref={testEndRef} />
         </div>
         <div className="border-t p-4">

@@ -39,34 +39,127 @@ interface FileBlock {
   type: "csv" | "txt" | "json" | "xml" | "html" | "md" | "xlsx";
 }
 
+const FENCED_BLOCK_REGEX = /(^|\n)(```[ \t]*([^\n`]*)\r?\n([\s\S]*?)\r?\n```)/g;
+const CHART_FENCE_LANGUAGES = new Set(["chart", "json", "js", "javascript", "ts", "typescript"]);
+const MERMAID_FENCE_LANGUAGES = new Set([
+  "mermaid",
+  "graph",
+  "flowchart",
+  "sequencediagram",
+  "classdiagram",
+  "statediagram",
+  "statediagram-v2",
+  "erdiagram",
+  "journey",
+  "gantt",
+  "mindmap",
+  "timeline",
+  "gitgraph",
+  "quadrantchart",
+  "requirementdiagram",
+  "kanban",
+  "architecture",
+  "block-beta",
+  "packet-beta",
+  "xychart-beta",
+  "sankey-beta",
+  "pie",
+]);
+const MERMAID_DIAGRAM_TYPE_PATTERN = /^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+title)?|mindmap|timeline|gitGraph|quadrantChart|requirementDiagram|c4Context|c4Container|c4Component|c4Dynamic|c4Deployment|kanban|architecture|block-beta|packet-beta|xychart-beta|sankey-beta)\b/i;
+const RAW_MERMAID_AT_END_REGEX = /(^|\n\n)((?:%%\{[\s\S]*?\}%%\s*\n)?(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+title)?|mindmap|timeline|gitGraph|quadrantChart|requirementDiagram|c4Context|c4Container|c4Component|c4Dynamic|c4Deployment|kanban|architecture|block-beta|packet-beta|xychart-beta|sankey-beta)\b[\s\S]*)$/i;
+
 // ==================== EXTRACTORS ====================
+
+function normalizeFenceLanguage(rawLanguage: string | undefined): string {
+  return (rawLanguage ?? "").trim().toLowerCase();
+}
+
+function parseChartDefinition(raw: string): ChartBlock | null {
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.data)) {
+      return null;
+    }
+
+    if (parsed.type !== "bar" && parsed.type !== "line" && parsed.type !== "pie") {
+      return null;
+    }
+
+    return parsed as ChartBlock;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeMermaidCode(raw: string): string {
+  return raw
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+}
+
+function getFirstMermaidDirective(code: string): string | undefined {
+  return code
+    .replace(/^%%\{[\s\S]*?\}%%\s*/m, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("%%"));
+}
 
 function extractCharts(text: string): { cleanText: string; charts: ChartBlock[] } {
   const charts: ChartBlock[] = [];
-  const cleanText = text.replace(/```chart\s*\n([\s\S]*?)```/g, (_, json) => {
-    try {
-      const parsed = JSON.parse(json.trim());
-      if (parsed.data && Array.isArray(parsed.data)) {
-        charts.push(parsed as ChartBlock);
-        return "";
-      }
-    } catch { /* ignore */ }
-    return _;
+  const cleanText = text.replace(FENCED_BLOCK_REGEX, (match, prefix, _fullFence, rawLanguage, content) => {
+    const language = normalizeFenceLanguage(rawLanguage);
+    if (!CHART_FENCE_LANGUAGES.has(language)) {
+      return match;
+    }
+
+    const parsed = parseChartDefinition(content);
+    if (!parsed) {
+      return match;
+    }
+
+    charts.push(parsed);
+    return prefix;
   });
   return { cleanText: cleanText.trim(), charts };
 }
 
 function extractMermaid(text: string): { cleanText: string; diagrams: string[] } {
   const diagrams: string[] = [];
-  const cleanText = text.replace(/```mermaid\s*\n([\s\S]*?)```/g, (_, code) => {
-    const trimmed = code.trim();
-    if (trimmed) {
-      diagrams.push(trimmed);
-      return "";
+  const withFencedRemoved = text.replace(FENCED_BLOCK_REGEX, (match, prefix, _fullFence, rawLanguage, code) => {
+    const language = normalizeFenceLanguage(rawLanguage);
+    const trimmed = sanitizeMermaidCode(code);
+    if (!trimmed) {
+      return match;
     }
-    return _;
+
+    const normalized = getFirstMermaidDirective(trimmed);
+    const looksLikeMermaid =
+      (!!language && MERMAID_FENCE_LANGUAGES.has(language)) ||
+      (!!normalized && MERMAID_DIAGRAM_TYPE_PATTERN.test(normalized));
+
+    if (looksLikeMermaid && normalized && MERMAID_DIAGRAM_TYPE_PATTERN.test(normalized)) {
+      diagrams.push(trimmed);
+      return prefix;
+    }
+
+    return match;
   });
-  return { cleanText: cleanText.trim(), diagrams };
+
+  const rawMatch = withFencedRemoved.match(RAW_MERMAID_AT_END_REGEX);
+  if (rawMatch) {
+    const rawDiagram = sanitizeMermaidCode(rawMatch[2]);
+    const normalized = getFirstMermaidDirective(rawDiagram);
+    if (normalized && MERMAID_DIAGRAM_TYPE_PATTERN.test(normalized)) {
+      diagrams.push(rawDiagram);
+      const prefix = withFencedRemoved.slice(0, rawMatch.index ?? 0);
+      return { cleanText: prefix.trim(), diagrams };
+    }
+  }
+
+  return { cleanText: withFencedRemoved.trim(), diagrams };
 }
 
 function extractFiles(text: string): { cleanText: string; files: FileBlock[] } {
@@ -140,22 +233,24 @@ function MermaidRenderer({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const uniqueId = useId().replace(/:/g, "");
   const [svg, setSvg] = useState<string>("");
-  const [error, setError] = useState<string>("");
+  const [fallbackCode, setFallbackCode] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
     const render = async () => {
       try {
+        const sanitizedCode = sanitizeMermaidCode(code);
+        await mermaid.parse(sanitizedCode, { suppressErrors: false });
         const id = `mermaid-${uniqueId}-${Date.now()}`;
-        const { svg: rendered } = await mermaid.render(id, code);
+        const { svg: rendered } = await mermaid.render(id, sanitizedCode);
         if (!cancelled) {
           setSvg(rendered);
-          setError("");
+          setFallbackCode("");
         }
-      } catch (e: any) {
+      } catch {
         if (!cancelled) {
-          setError(e.message || "Diagram render failed");
           setSvg("");
+          setFallbackCode(code);
         }
       }
     };
@@ -163,11 +258,11 @@ function MermaidRenderer({ code }: { code: string }) {
     return () => { cancelled = true; };
   }, [code, uniqueId]);
 
-  if (error) {
+  if (fallbackCode) {
     return (
-      <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 my-2">
+      <div className="my-2 rounded-lg border bg-muted/30 p-3 overflow-x-auto [&_p]:hidden">
         <p className="text-xs text-warning font-medium mb-1">⚠️ Diagram render error</p>
-        <pre className="text-[10px] text-muted-foreground overflow-x-auto">{code}</pre>
+        <pre className="text-[11px] font-mono text-foreground/80 whitespace-pre-wrap">{fallbackCode}</pre>
       </div>
     );
   }
