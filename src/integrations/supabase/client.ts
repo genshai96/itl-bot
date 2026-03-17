@@ -4,9 +4,33 @@ import type { Database } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_STORAGE_KEY_PREFIX = (() => {
+  try {
+    const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
+    return `sb-${projectRef}-`;
+  } catch {
+    return "sb-";
+  }
+})();
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
+
+export function clearSupabaseAuthStorage() {
+  if (typeof window === "undefined") return;
+
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i);
+    if (key?.startsWith(SUPABASE_STORAGE_KEY_PREFIX)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  for (const key of keysToRemove) {
+    window.localStorage.removeItem(key);
+  }
+}
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {

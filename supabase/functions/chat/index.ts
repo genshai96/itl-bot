@@ -1581,7 +1581,7 @@ serve(async (req) => {
   }
 
   try {
-    const { tenant_id, message, conversation_id, end_user, attachments } = await req.json();
+    const { tenant_id, agent_id, message, conversation_id, end_user, attachments } = await req.json();
     const traceId = buildTraceId();
 
     if (!tenant_id || !message) {
@@ -1654,6 +1654,7 @@ serve(async (req) => {
         .from("conversations")
         .insert({
           tenant_id,
+          agent_id: agent_id || null,
           end_user_name: end_user?.name || null,
           end_user_email: end_user?.email || null,
           end_user_phone: end_user?.phone || null,

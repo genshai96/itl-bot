@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { clearSupabaseAuthStorage, supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextType {
@@ -13,6 +13,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const RECOVERABLE_AUTH_ERROR = /invalid jwt|jwt expired|invalid refresh token|refresh token|session/i;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -20,21 +21,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    let isMounted = true;
+
+    const applySession = (nextSession: Session | null, nextUser?: User | null) => {
+      if (!isMounted) return;
+      setSession(nextSession);
+      setUser(nextUser ?? nextSession?.user ?? null);
       setLoading(false);
+    };
+
+    const isRecoverableAuthError = (message?: string) => RECOVERABLE_AUTH_ERROR.test(message ?? "");
+
+    const clearInvalidSession = async () => {
+      await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      clearSupabaseAuthStorage();
+      applySession(null);
+    };
+
+    const validateInitialSession = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        if (isRecoverableAuthError(error.message)) {
+          await clearInvalidSession();
+        } else {
+          applySession(null);
+        }
+        return;
+      }
+
+      const initialSession = data.session;
+      if (!initialSession) {
+        applySession(null);
+        return;
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser(initialSession.access_token);
+      if (userError) {
+        if (isRecoverableAuthError(userError.message)) {
+          await clearInvalidSession();
+        } else {
+          applySession(initialSession);
+        }
+        return;
+      }
+
+      applySession(initialSession, userData.user ?? initialSession.user ?? null);
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      applySession(nextSession);
     });
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    void validateInitialSession();
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, displayName?: string) => {
@@ -50,13 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    let { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error && RECOVERABLE_AUTH_ERROR.test(error.message || "")) {
+      await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      clearSupabaseAuthStorage();
+      ({ error } = await supabase.auth.signInWithPassword({ email, password }));
+    }
     if (error) throw error;
   };
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    if (error) {
+      if (RECOVERABLE_AUTH_ERROR.test(error.message || "")) {
+        await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+        clearSupabaseAuthStorage();
+        return;
+      }
+      throw error;
+    }
   };
 
   const resetPassword = async (email: string) => {

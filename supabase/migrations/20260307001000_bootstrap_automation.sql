@@ -20,10 +20,12 @@ ALTER TABLE public.tenant_bootstrap_runs ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_tenant_bootstrap_runs_tenant
   ON public.tenant_bootstrap_runs (tenant_id, created_at DESC);
 
+DROP POLICY IF EXISTS "Tenant members view bootstrap runs" ON public.tenant_bootstrap_runs;
 CREATE POLICY "Tenant members view bootstrap runs"
   ON public.tenant_bootstrap_runs FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage bootstrap runs" ON public.tenant_bootstrap_runs;
 CREATE POLICY "Tenant admins manage bootstrap runs"
   ON public.tenant_bootstrap_runs FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), tenant_id, 'tenant_admin') OR public.is_system_admin(auth.uid()));

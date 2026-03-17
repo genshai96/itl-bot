@@ -20,6 +20,24 @@ function maskPII(text: string): string {
   return masked;
 }
 
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|above|prior)\s+(instructions?|prompts?)/i,
+  /you\s+are\s+now\s+(a|an)\s+/i,
+  /forget\s+(all\s+)?(your|previous)\s+/i,
+  /system\s*:\s*/i,
+  /\[INST\]/i,
+  /\<\|im_start\|\>/i,
+  /do\s+not\s+follow\s+/i,
+  /override\s+(your|the)\s+(instructions?|rules?|guidelines?)/i,
+  /pretend\s+(you\s+are|to\s+be)/i,
+  /jailbreak/i,
+  /DAN\s+mode/i,
+];
+
+function detectPromptInjection(text: string): boolean {
+  return INJECTION_PATTERNS.some((p) => p.test(text));
+}
+
 function buildTraceId(): string {
   return `trace_${crypto.randomUUID()}`;
 }
@@ -212,6 +230,32 @@ async function ensureAutoHandoff(
 
   await supabase.from("conversations").update({ status: "handoff", updated_at: new Date().toISOString() }).eq("id", conversationId);
   return { created: true, reason };
+}
+
+function safeEnqueueSse(controller: ReadableStreamDefaultController, encoder: TextEncoder, payload: unknown): boolean {
+  try {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+    return true;
+  } catch (err) {
+    console.error("Failed to enqueue SSE payload:", err);
+    return false;
+  }
+}
+
+function safeEnqueueDone(controller: ReadableStreamDefaultController, encoder: TextEncoder): void {
+  try {
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+  } catch (err) {
+    console.error("Failed to enqueue SSE done event:", err);
+  }
+}
+
+function safeCloseController(controller: ReadableStreamDefaultController): void {
+  try {
+    controller.close();
+  } catch (err) {
+    console.error("Failed to close stream controller:", err);
+  }
 }
 
 // ==================== FLOW ENGINE (shared logic) ====================
@@ -453,7 +497,7 @@ serve(async (req) => {
   }
 
   try {
-    const { tenant_id, message, conversation_id, end_user, attachments } = await req.json();
+    const { tenant_id, agent_id, message, conversation_id, end_user, attachments } = await req.json();
     const traceId = buildTraceId();
 
     if (!tenant_id || !message) {
@@ -481,6 +525,22 @@ serve(async (req) => {
     }
     tenantConfig.tenant_id = tenant_id;
 
+    // Prompt injection defense
+    if (tenantConfig.prompt_injection_defense && detectPromptInjection(message)) {
+      await supabase.from("audit_logs").insert({
+        tenant_id,
+        actor_type: "system",
+        action: "prompt_injection_blocked",
+        details: { trace_id: traceId, message_preview: message.substring(0, 200) },
+      });
+      const blocked = new TextEncoder().encode(
+        `data: ${JSON.stringify({ type: "error", message: "Xin lỗi, tin nhắn của bạn không thể xử lý. Vui lòng thử lại với nội dung khác." })}\n\ndata: [DONE]\n\n`,
+      );
+      return new Response(blocked, {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+      });
+    }
+
     let processedMessage = message;
     if (tenantConfig.pii_masking) processedMessage = maskPII(message);
 
@@ -492,6 +552,7 @@ serve(async (req) => {
         .from("conversations")
         .insert({
           tenant_id,
+          agent_id: agent_id || null,
           end_user_name: end_user?.name || null,
           end_user_email: end_user?.email || null,
           end_user_phone: end_user?.phone || null,
@@ -690,75 +751,100 @@ serve(async (req) => {
           const encoder = new TextEncoder();
           const staticStream = new ReadableStream({
             async start(controller) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "meta", conversation_id: convId, trace_id: traceId, flow_active: true, skills_applied: matchedSkillIds })}\n\n`));
-              // Send as single token
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "token", content: flowResult.staticResponse })}\n\n`));
+              try {
+                safeEnqueueSse(controller, encoder, { type: "meta", conversation_id: convId, trace_id: traceId, flow_active: true, skills_applied: matchedSkillIds });
+                safeEnqueueSse(controller, encoder, { type: "token", content: flowResult.staticResponse });
 
-              // Save bot message
-              const { data: insertedBotMessage } = await supabase
-                .from("messages")
-                .insert({
-                  conversation_id: convId,
-                  role: "bot",
-                  content: flowResult.staticResponse,
-                })
-                .select("id")
-                .single();
-
-              const defaultConfidence = 0.58;
-              const minConfidence = Number(tenantConfig.memory_min_confidence ?? 0.55);
-              if (tenantConfig.memory_v2_enabled && message.length >= 20 && defaultConfidence >= minConfidence) {
-                const { data: memoryInsert } = await supabase
-                  .from("memory_items")
-                  .insert({
-                    tenant_id,
-                    user_ref: userRef,
-                    memory_type: "episodic",
-                    memory_key: null,
-                    content: message,
-                    confidence: defaultConfidence,
-                    importance: 2,
-                    risk_level: "low",
-                    source_conversation_id: convId,
-                    source_message_id: insertedUserMessage?.id || insertedBotMessage?.id || null,
-                    metadata: { source: "chat_stream_static" },
-                  })
-                  .select("id")
-                  .single();
-
-                if (memoryInsert?.id) {
-                  await supabase.from("memory_access_logs").insert({
-                    tenant_id,
-                    conversation_id: convId,
-                    user_ref: userRef,
-                    memory_item_id: memoryInsert.id,
-                    action: "write",
-                    metadata: { reason: "stream_static_capture" },
-                  });
+                let insertedBotMessage: { id?: string } | null = null;
+                try {
+                  const { data } = await supabase
+                    .from("messages")
+                    .insert({
+                      conversation_id: convId,
+                      role: "bot",
+                      content: flowResult.staticResponse,
+                    })
+                    .select("id")
+                    .single();
+                  insertedBotMessage = data;
+                } catch (err) {
+                  console.error("Failed to persist static streamed bot message:", err);
                 }
+
+                const defaultConfidence = 0.58;
+                const minConfidence = Number(tenantConfig.memory_min_confidence ?? 0.55);
+                if (tenantConfig.memory_v2_enabled && message.length >= 20 && defaultConfidence >= minConfidence) {
+                  try {
+                    const { data: memoryInsert } = await supabase
+                      .from("memory_items")
+                      .insert({
+                        tenant_id,
+                        user_ref: userRef,
+                        memory_type: "episodic",
+                        memory_key: null,
+                        content: message,
+                        confidence: defaultConfidence,
+                        importance: 2,
+                        risk_level: "low",
+                        source_conversation_id: convId,
+                        source_message_id: insertedUserMessage?.id || insertedBotMessage?.id || null,
+                        metadata: { source: "chat_stream_static" },
+                      })
+                      .select("id")
+                      .single();
+
+                    if (memoryInsert?.id) {
+                      await supabase.from("memory_access_logs").insert({
+                        tenant_id,
+                        conversation_id: convId,
+                        user_ref: userRef,
+                        memory_item_id: memoryInsert.id,
+                        action: "write",
+                        metadata: { reason: "stream_static_capture" },
+                      });
+                    }
+                  } catch (err) {
+                    console.error("Failed to persist static stream memory:", err);
+                  }
+                }
+
+                try {
+                  const toolFailureCount = await getRecentToolFailureCount(supabase, convId);
+                  const policy = evaluateAutoHandoffPolicy(message, flowResult.staticResponse || "", toolFailureCount);
+                  if (policy.trigger) {
+                    await ensureAutoHandoff(
+                      supabase,
+                      tenant_id,
+                      convId,
+                      policy.priority,
+                      policy.reasonCode,
+                      policy.reasonText,
+                    );
+                  }
+                } catch (err) {
+                  console.error("Failed to evaluate static stream auto handoff:", err);
+                }
+
+                try {
+                  await supabase.from("conversations").update({
+                    metadata: { ...conversationMetadata, flow_state: flowResult.newState },
+                    updated_at: new Date().toISOString(),
+                  }).eq("id", convId);
+                } catch (err) {
+                  console.error("Failed to update conversation after static stream:", err);
+                }
+
+                safeEnqueueDone(controller, encoder);
+                safeCloseController(controller);
+              } catch (err) {
+                console.error("Static stream runtime error:", err);
+                safeEnqueueSse(controller, encoder, {
+                  type: "error",
+                  message: err instanceof Error ? err.message : "Static stream failed",
+                });
+                safeEnqueueDone(controller, encoder);
+                safeCloseController(controller);
               }
-
-              const toolFailureCount = await getRecentToolFailureCount(supabase, convId);
-              const policy = evaluateAutoHandoffPolicy(message, flowResult.staticResponse || "", toolFailureCount);
-              if (policy.trigger) {
-                await ensureAutoHandoff(
-                  supabase,
-                  tenant_id,
-                  convId,
-                  policy.priority,
-                  policy.reasonCode,
-                  policy.reasonText,
-                );
-              }
-
-              // Update flow state
-              await supabase.from("conversations").update({
-                metadata: { ...conversationMetadata, flow_state: flowResult.newState },
-                updated_at: new Date().toISOString(),
-              }).eq("id", convId);
-
-              controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
-              controller.close();
             },
           });
 
@@ -865,98 +951,130 @@ data1,data2
 
     const stream = new ReadableStream({
       async start(controller) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "meta", conversation_id: convId, trace_id: traceId, flow_active: !!activeFlow, skills_applied: matchedSkillIds })}\n\n`));
-
-        const reader = llmResponse.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+          safeEnqueueSse(controller, encoder, { type: "meta", conversation_id: convId, trace_id: traceId, flow_active: !!activeFlow, skills_applied: matchedSkillIds });
 
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const payload = line.slice(6).trim();
-              if (payload === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(payload);
-                const delta = parsed.choices?.[0]?.delta?.content;
-                if (delta) {
-                  fullContent += delta;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "token", content: delta })}\n\n`));
-                }
-              } catch { /* skip */ }
+          if (!llmResponse.body) {
+            throw new Error("LLM provider returned no response body for streaming");
+          }
+
+          const reader = llmResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                const payload = line.slice(6).trim();
+                if (payload === "[DONE]") continue;
+                try {
+                  const parsed = JSON.parse(payload);
+                  const delta = parsed.choices?.[0]?.delta?.content;
+                  if (delta) {
+                    fullContent += delta;
+                    safeEnqueueSse(controller, encoder, { type: "token", content: delta });
+                  }
+                } catch { /* skip */ }
+              }
+            }
+          } catch (err) {
+            console.error("Stream read error:", err);
+          }
+
+          let insertedBotMessage: { id?: string } | null = null;
+          try {
+            const { data } = await supabase
+              .from("messages")
+              .insert({
+                conversation_id: convId,
+                role: "bot",
+                content: fullContent || "Không có phản hồi.",
+              })
+              .select("id")
+              .single();
+            insertedBotMessage = data;
+          } catch (err) {
+            console.error("Failed to persist streamed bot message:", err);
+          }
+
+          const defaultConfidence = 0.58;
+          const minConfidence = Number(tenantConfig.memory_min_confidence ?? 0.55);
+          if (tenantConfig.memory_v2_enabled && message.length >= 20 && defaultConfidence >= minConfidence) {
+            try {
+              const { data: memoryInsert } = await supabase
+                .from("memory_items")
+                .insert({
+                  tenant_id,
+                  user_ref: userRef,
+                  memory_type: "episodic",
+                  memory_key: null,
+                  content: message,
+                  confidence: defaultConfidence,
+                  importance: 2,
+                  risk_level: "low",
+                  source_conversation_id: convId,
+                  source_message_id: insertedUserMessage?.id || insertedBotMessage?.id || null,
+                  metadata: { source: "chat_stream" },
+                })
+                .select("id")
+                .single();
+
+              if (memoryInsert?.id) {
+                await supabase.from("memory_access_logs").insert({
+                  tenant_id,
+                  conversation_id: convId,
+                  user_ref: userRef,
+                  memory_item_id: memoryInsert.id,
+                  action: "write",
+                  metadata: { reason: "stream_capture" },
+                });
+              }
+            } catch (err) {
+              console.error("Failed to persist stream memory:", err);
             }
           }
-        } catch (err) {
-          console.error("Stream read error:", err);
-        }
 
-        const { data: insertedBotMessage } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: convId,
-            role: "bot",
-            content: fullContent || "Không có phản hồi.",
-          })
-          .select("id")
-          .single();
-
-        const defaultConfidence = 0.58;
-        const minConfidence = Number(tenantConfig.memory_min_confidence ?? 0.55);
-        if (tenantConfig.memory_v2_enabled && message.length >= 20 && defaultConfidence >= minConfidence) {
-          const { data: memoryInsert } = await supabase
-            .from("memory_items")
-            .insert({
-              tenant_id,
-              user_ref: userRef,
-              memory_type: "episodic",
-              memory_key: null,
-              content: message,
-              confidence: defaultConfidence,
-              importance: 2,
-              risk_level: "low",
-              source_conversation_id: convId,
-              source_message_id: insertedUserMessage?.id || insertedBotMessage?.id || null,
-              metadata: { source: "chat_stream" },
-            })
-            .select("id")
-            .single();
-
-          if (memoryInsert?.id) {
-            await supabase.from("memory_access_logs").insert({
-              tenant_id,
-              conversation_id: convId,
-              user_ref: userRef,
-              memory_item_id: memoryInsert.id,
-              action: "write",
-              metadata: { reason: "stream_capture" },
-            });
+          try {
+            const toolFailureCount = await getRecentToolFailureCount(supabase, convId);
+            const policy = evaluateAutoHandoffPolicy(message, fullContent || "", toolFailureCount);
+            if (policy.trigger) {
+              await ensureAutoHandoff(
+                supabase,
+                tenant_id,
+                convId,
+                policy.priority,
+                policy.reasonCode,
+                policy.reasonText,
+              );
+            }
+          } catch (err) {
+            console.error("Failed to evaluate stream auto handoff:", err);
           }
+
+          try {
+            await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convId);
+          } catch (err) {
+            console.error("Failed to update conversation after stream:", err);
+          }
+
+          safeEnqueueDone(controller, encoder);
+          safeCloseController(controller);
+        } catch (err) {
+          console.error("Main stream runtime error:", err);
+          safeEnqueueSse(controller, encoder, {
+            type: "error",
+            message: err instanceof Error ? err.message : "Streaming failed",
+          });
+          safeEnqueueDone(controller, encoder);
+          safeCloseController(controller);
         }
-
-        const toolFailureCount = await getRecentToolFailureCount(supabase, convId);
-        const policy = evaluateAutoHandoffPolicy(message, fullContent || "", toolFailureCount);
-        if (policy.trigger) {
-          await ensureAutoHandoff(
-            supabase,
-            tenant_id,
-            convId,
-            policy.priority,
-            policy.reasonCode,
-            policy.reasonText,
-          );
-        }
-
-        await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convId);
-
-        controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
-        controller.close();
       },
     });
 

@@ -1,4 +1,4 @@
-project_id = "zbnebyfjaqbshjqqyhqn"
+project_id = "xvnaowmwikookrkkgkcp"
 
 [functions.chat]
 verify_jwt = false
@@ -22,4 +22,25 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.extract-file-content]
+verify_jwt = false
+
+[functions.openviking-memory]
+verify_jwt = false
+
+[functions.create-operator]
+verify_jwt = false
+
+[functions.bootstrap]
+verify_jwt = false
+
+[functions.bootstrap-validate]
+verify_jwt = false
+
+[functions.channel-telegram-webhook]
+verify_jwt = false
+
+[functions.channel-zalo-webhook]
+verify_jwt = false
+
+[functions.channel-whatsapp-webhook]
 verify_jwt = false

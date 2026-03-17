@@ -6,6 +6,26 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+class HttpError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(status: number, message: string, code?: string, details?: unknown) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function jsonResponse(status: number, payload: Record<string, unknown>) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -14,10 +34,7 @@ serve(async (req) => {
     const tenantId = body.tenant_id as string;
 
     if (!tenantId) {
-      return new Response(JSON.stringify({ ok: false, errors: ["tenant_id is required"], warnings: [] }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(400, { ok: false, error: "tenant_id is required", code: "missing_tenant_id", errors: ["tenant_id is required"], warnings: [] });
     }
 
     const supabase = createClient(
@@ -28,25 +45,24 @@ serve(async (req) => {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    const { data: tenant } = await supabase
+    const { data: tenant, error: tenantError } = await supabase
       .from("tenants")
       .select("id, name, slug, status")
       .eq("id", tenantId)
       .maybeSingle();
 
+    if (tenantError) throw new HttpError(500, "Failed to load tenant", "tenant_lookup_failed", tenantError);
     if (!tenant) {
-      return new Response(JSON.stringify({ ok: false, errors: ["tenant not found"], warnings }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(404, { ok: false, error: "tenant not found", code: "tenant_not_found", errors: ["tenant not found"], warnings });
     }
 
-    const { data: config } = await supabase
+    const { data: config, error: configError } = await supabase
       .from("tenant_configs")
       .select("id, memory_v2_enabled, skills_runtime_enabled, mcp_gateway_enabled")
       .eq("tenant_id", tenantId)
       .maybeSingle();
 
+    if (configError) throw new HttpError(500, "Failed to load tenant config", "tenant_config_lookup_failed", configError);
     if (!config) warnings.push("tenant_configs missing; bootstrap will create defaults");
 
     const skillPacks = Array.isArray(body.skills?.packs) ? body.skills.packs : [];
@@ -77,7 +93,7 @@ serve(async (req) => {
       },
     };
 
-    await supabase.from("tenant_bootstrap_runs").insert({
+    const { error: runError } = await supabase.from("tenant_bootstrap_runs").insert({
       tenant_id: tenantId,
       mode: "validate",
       status: errors.length ? "failed" : "validated",
@@ -87,14 +103,27 @@ serve(async (req) => {
       finished_at: new Date().toISOString(),
     });
 
-    return new Response(JSON.stringify({ ok: errors.length === 0, errors, warnings, plan }), {
-      status: errors.length ? 400 : 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (runError) {
+      throw new HttpError(500, "Failed to record bootstrap validation run", "bootstrap_run_insert_failed", runError);
+    }
+
+    return jsonResponse(errors.length ? 400 : 200, {
+      ok: errors.length === 0,
+      error: errors.length ? errors.join("; ") : null,
+      errors,
+      warnings,
+      plan,
     });
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const appError = error instanceof HttpError
+      ? error
+      : new HttpError(500, error instanceof Error ? error.message : "Unknown error", "bootstrap_validate_failed", error);
+
+    return jsonResponse(appError.status, {
+      ok: false,
+      error: appError.message,
+      code: appError.code,
+      details: appError.details,
     });
   }
 });

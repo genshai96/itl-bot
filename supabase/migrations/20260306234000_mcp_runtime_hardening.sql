@@ -49,18 +49,22 @@ BEGIN
 END $$;
 
 -- RLS policies
+DROP POLICY IF EXISTS "Tenant members view mcp runtime state" ON public.mcp_runtime_state;
 CREATE POLICY "Tenant members view mcp runtime state"
   ON public.mcp_runtime_state FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage mcp runtime state" ON public.mcp_runtime_state;
 CREATE POLICY "Tenant admins manage mcp runtime state"
   ON public.mcp_runtime_state FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), tenant_id, 'tenant_admin') OR public.is_system_admin(auth.uid()));
 
+DROP POLICY IF EXISTS "Tenant members view mcp health events" ON public.mcp_health_events;
 CREATE POLICY "Tenant members view mcp health events"
   ON public.mcp_health_events FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "System insert mcp health events" ON public.mcp_health_events;
 CREATE POLICY "System insert mcp health events"
   ON public.mcp_health_events FOR INSERT TO authenticated
   WITH CHECK (true);

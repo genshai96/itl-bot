@@ -71,6 +71,46 @@ type BootstrapRequest = {
   };
 };
 
+class HttpError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(status: number, message: string, code?: string, details?: unknown) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function jsonResponse(status: number, payload: Record<string, unknown>) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function assertNoError(error: unknown, message: string, code: string) {
+  if (error) throw new HttpError(500, message, code, error);
+}
+
+async function updateRunStatus(
+  supabase: ReturnType<typeof createClient>,
+  runId: string | null,
+  patch: Record<string, unknown>,
+) {
+  if (!runId) return;
+  const { error } = await supabase
+    .from("tenant_bootstrap_runs")
+    .update(patch)
+    .eq("id", runId);
+
+  if (error) {
+    console.error("bootstrap run update error:", error);
+  }
+}
+
 function normalizeRequest(input: BootstrapRequest): BootstrapRequest {
   return {
     ...input,
@@ -156,10 +196,7 @@ serve(async (req) => {
 
     const validation = validateBootstrapPayload(normalized);
     if (!validation.ok) {
-      return new Response(JSON.stringify({ ...validation, ok: false }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(400, { ...validation, ok: false, error: validation.errors.join("; ") });
     }
 
     const mode = normalized.mode || "bootstrap";
@@ -170,15 +207,12 @@ serve(async (req) => {
       .eq("id", normalized.tenant_id)
       .maybeSingle();
 
-    if (tenantError) throw tenantError;
+    assertNoError(tenantError, "Failed to load tenant", "tenant_lookup_failed");
     if (!tenant) {
-      return new Response(JSON.stringify({ ok: false, errors: ["tenant not found"], warnings: [] }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(404, { ok: false, error: "tenant not found", code: "tenant_not_found", errors: ["tenant not found"], warnings: [] });
     }
 
-    const { data: run } = await supabase
+    const { data: run, error: runInsertError } = await supabase
       .from("tenant_bootstrap_runs")
       .insert({
         tenant_id: normalized.tenant_id,
@@ -189,18 +223,21 @@ serve(async (req) => {
       .select("id")
       .single();
 
+    assertNoError(runInsertError, "Failed to create bootstrap run record", "bootstrap_run_insert_failed");
     runId = run?.id || null;
 
     if (mode === "validate") {
-      const { data: existingSkillBindings } = await supabase
+      const { data: existingSkillBindings, error: skillBindingsError } = await supabase
         .from("tenant_skill_bindings")
         .select("id")
         .eq("tenant_id", normalized.tenant_id);
+      assertNoError(skillBindingsError, "Failed to inspect existing tenant skill bindings", "skill_bindings_lookup_failed");
 
-      const { data: existingMcpBindings } = await supabase
+      const { data: existingMcpBindings, error: mcpBindingsError } = await supabase
         .from("tenant_mcp_bindings")
         .select("id")
         .eq("tenant_id", normalized.tenant_id);
+      assertNoError(mcpBindingsError, "Failed to inspect existing tenant MCP bindings", "mcp_bindings_lookup_failed");
 
       const plan = {
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, status: tenant.status },
@@ -222,29 +259,21 @@ serve(async (req) => {
         governance: normalized.governance,
       };
 
-      if (runId) {
-        await supabase
-          .from("tenant_bootstrap_runs")
-          .update({
-            status: "validated",
-            result: { validation, plan },
-            finished_at: new Date().toISOString(),
-          })
-          .eq("id", runId);
-      }
-
-      return new Response(JSON.stringify({ ...validation, ok: true, plan }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      await updateRunStatus(supabase, runId, {
+        status: "validated",
+        result: { validation, plan },
+        finished_at: new Date().toISOString(),
       });
+
+      return jsonResponse(200, { ...validation, ok: true, plan });
     }
 
-    // Bootstrap mode (idempotent provisioning)
     const { data: existingConfig, error: configError } = await supabase
       .from("tenant_configs")
       .select("*")
       .eq("tenant_id", normalized.tenant_id)
       .maybeSingle();
-    if (configError) throw configError;
+    assertNoError(configError, "Failed to load tenant config", "tenant_config_lookup_failed");
 
     previousTenantConfig = existingConfig || null;
 
@@ -263,18 +292,20 @@ serve(async (req) => {
     };
 
     if (existingConfig) {
-      await supabase.from("tenant_configs").update(configPatch).eq("tenant_id", normalized.tenant_id);
+      const { error } = await supabase.from("tenant_configs").update(configPatch).eq("tenant_id", normalized.tenant_id);
+      assertNoError(error, "Failed to update tenant config", "tenant_config_update_failed");
     } else {
-      await supabase.from("tenant_configs").insert({ tenant_id: normalized.tenant_id, ...configPatch });
+      const { error } = await supabase.from("tenant_configs").insert({ tenant_id: normalized.tenant_id, ...configPatch });
+      assertNoError(error, "Failed to create tenant config", "tenant_config_insert_failed");
     }
 
-    // Skills pack provisioning
     for (const pack of normalized.skills?.packs || []) {
-      const { data: existingRegistry } = await supabase
+      const { data: existingRegistry, error: existingRegistryError } = await supabase
         .from("skills_registry")
         .select("id, version")
         .eq("skill_id", pack.skill_id)
         .maybeSingle();
+      assertNoError(existingRegistryError, `Failed to inspect skill registry for ${pack.skill_id}`, "skill_registry_lookup_failed");
 
       let skillRegistryId = existingRegistry?.id || null;
       if (!skillRegistryId) {
@@ -291,19 +322,20 @@ serve(async (req) => {
           })
           .select("id")
           .single();
-        if (error) throw error;
+        assertNoError(error, `Failed to create skill registry for ${pack.skill_id}`, "skill_registry_insert_failed");
         skillRegistryId = insertedRegistry?.id || null;
         if (skillRegistryId) created.skillsRegistryIds.push(skillRegistryId);
       }
 
-      if (!skillRegistryId) throw new Error(`Failed to resolve skills_registry for ${pack.skill_id}`);
+      if (!skillRegistryId) throw new HttpError(500, `Failed to resolve skills_registry for ${pack.skill_id}`, "skill_registry_missing");
 
-      const { data: existingBinding } = await supabase
+      const { data: existingBinding, error: existingBindingError } = await supabase
         .from("tenant_skill_bindings")
         .select("id")
         .eq("tenant_id", normalized.tenant_id)
         .eq("skill_registry_id", skillRegistryId)
         .maybeSingle();
+      assertNoError(existingBindingError, `Failed to inspect skill binding for ${pack.skill_id}`, "skill_binding_lookup_failed");
 
       const { data: skillBinding, error: bindError } = await supabase
         .from("tenant_skill_bindings")
@@ -316,17 +348,17 @@ serve(async (req) => {
         }, { onConflict: "tenant_id,skill_registry_id" })
         .select("id")
         .single();
-      if (bindError) throw bindError;
+      assertNoError(bindError, `Failed to upsert skill binding for ${pack.skill_id}`, "skill_binding_upsert_failed");
       if (!existingBinding?.id && skillBinding?.id) created.skillBindingIds.push(skillBinding.id);
     }
 
-    // MCP provisioning
     for (const server of normalized.mcp?.servers || []) {
-      const { data: existingServer } = await supabase
+      const { data: existingServer, error: existingServerError } = await supabase
         .from("mcp_servers")
         .select("id")
         .eq("server_key", server.server_key)
         .maybeSingle();
+      assertNoError(existingServerError, `Failed to inspect MCP server ${server.server_key}`, "mcp_server_lookup_failed");
 
       let serverId = existingServer?.id || null;
       if (!serverId) {
@@ -344,19 +376,20 @@ serve(async (req) => {
           })
           .select("id")
           .single();
-        if (error) throw error;
+        assertNoError(error, `Failed to create MCP server ${server.server_key}`, "mcp_server_insert_failed");
         serverId = insertedServer?.id || null;
         if (serverId) created.mcpServerIds.push(serverId);
       }
 
-      if (!serverId) throw new Error(`Failed to resolve mcp_server ${server.server_key}`);
+      if (!serverId) throw new HttpError(500, `Failed to resolve mcp_server ${server.server_key}`, "mcp_server_missing");
 
-      const { data: existingBinding } = await supabase
+      const { data: existingBinding, error: existingMcpBindingError } = await supabase
         .from("tenant_mcp_bindings")
         .select("id")
         .eq("tenant_id", normalized.tenant_id)
         .eq("mcp_server_id", serverId)
         .maybeSingle();
+      assertNoError(existingMcpBindingError, `Failed to inspect MCP binding for ${server.server_key}`, "mcp_binding_lookup_failed");
 
       const { data: binding, error: bindingError } = await supabase
         .from("tenant_mcp_bindings")
@@ -372,16 +405,17 @@ serve(async (req) => {
         }, { onConflict: "tenant_id,mcp_server_id" })
         .select("id")
         .single();
-      if (bindingError) throw bindingError;
+      assertNoError(bindingError, `Failed to upsert MCP binding for ${server.server_key}`, "mcp_binding_upsert_failed");
       if (!existingBinding?.id && binding?.id) created.mcpBindingIds.push(binding.id);
 
       for (const policy of server.tool_policies || []) {
-        const { data: existingPolicy } = await supabase
+        const { data: existingPolicy, error: existingPolicyError } = await supabase
           .from("mcp_tool_policies")
           .select("id")
           .eq("tenant_id", normalized.tenant_id)
           .eq("tool_id", policy.tool_id)
           .maybeSingle();
+        assertNoError(existingPolicyError, `Failed to inspect MCP tool policy ${policy.tool_id}`, "mcp_policy_lookup_failed");
 
         const { data: policyRow, error: policyError } = await supabase
           .from("mcp_tool_policies")
@@ -397,7 +431,7 @@ serve(async (req) => {
           }, { onConflict: "tenant_id,tool_id" })
           .select("id")
           .single();
-        if (policyError) throw policyError;
+        assertNoError(policyError, `Failed to upsert MCP tool policy ${policy.tool_id}`, "mcp_policy_upsert_failed");
         if (!existingPolicy?.id && policyRow?.id) created.mcpPolicyIds.push(policyRow.id);
       }
     }
@@ -413,80 +447,73 @@ serve(async (req) => {
       warnings: validation.warnings,
     };
 
-    if (runId) {
-      await supabase
-        .from("tenant_bootstrap_runs")
-        .update({
-          status: "completed",
-          result,
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", runId);
-    }
-
-    return new Response(JSON.stringify({ ok: true, result }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    await updateRunStatus(supabase, runId, {
+      status: "completed",
+      result,
+      finished_at: new Date().toISOString(),
     });
+
+    return jsonResponse(200, { ok: true, result });
   } catch (error) {
     console.error("bootstrap error:", error);
+
+    const appError = error instanceof HttpError
+      ? error
+      : new HttpError(500, error instanceof Error ? error.message : "Unknown error", "bootstrap_failed", error);
 
     if (normalized?.rollback_on_error) {
       try {
         if (created.mcpPolicyIds.length) {
-          await supabase.from("mcp_tool_policies").delete().in("id", created.mcpPolicyIds);
+          const { error } = await supabase.from("mcp_tool_policies").delete().in("id", created.mcpPolicyIds);
+          assertNoError(error, "Failed to rollback MCP tool policies", "rollback_mcp_policies_failed");
         }
         if (created.mcpBindingIds.length) {
-          await supabase.from("tenant_mcp_bindings").delete().in("id", created.mcpBindingIds);
+          const { error } = await supabase.from("tenant_mcp_bindings").delete().in("id", created.mcpBindingIds);
+          assertNoError(error, "Failed to rollback MCP bindings", "rollback_mcp_bindings_failed");
         }
         if (created.mcpServerIds.length) {
-          await supabase.from("mcp_servers").delete().in("id", created.mcpServerIds);
+          const { error } = await supabase.from("mcp_servers").delete().in("id", created.mcpServerIds);
+          assertNoError(error, "Failed to rollback MCP servers", "rollback_mcp_servers_failed");
         }
         if (created.skillBindingIds.length) {
-          await supabase.from("tenant_skill_bindings").delete().in("id", created.skillBindingIds);
+          const { error } = await supabase.from("tenant_skill_bindings").delete().in("id", created.skillBindingIds);
+          assertNoError(error, "Failed to rollback skill bindings", "rollback_skill_bindings_failed");
         }
         if (created.skillsRegistryIds.length) {
-          await supabase.from("skills_registry").delete().in("id", created.skillsRegistryIds);
+          const { error } = await supabase.from("skills_registry").delete().in("id", created.skillsRegistryIds);
+          assertNoError(error, "Failed to rollback skills registry rows", "rollback_skill_registry_failed");
         }
 
         if (normalized?.tenant_id && previousTenantConfig) {
-          await supabase.from("tenant_configs").update(previousTenantConfig).eq("tenant_id", normalized.tenant_id);
+          const { error } = await supabase.from("tenant_configs").update(previousTenantConfig).eq("tenant_id", normalized.tenant_id);
+          assertNoError(error, "Failed to rollback tenant config", "rollback_tenant_config_failed");
         }
 
-        if (runId) {
-          await supabase
-            .from("tenant_bootstrap_runs")
-            .update({
-              status: "rolled_back",
-              error_message: error instanceof Error ? error.message : "Unknown error",
-              result: { rollback: true, created },
-              finished_at: new Date().toISOString(),
-            })
-            .eq("id", runId);
-        }
+        await updateRunStatus(supabase, runId, {
+          status: "rolled_back",
+          error_message: appError.message,
+          result: { rollback: true, created },
+          finished_at: new Date().toISOString(),
+        });
       } catch (rollbackError) {
         console.error("bootstrap rollback error:", rollbackError);
       }
     }
 
-    if (runId) {
-      await supabase
-        .from("tenant_bootstrap_runs")
-        .update({
-          status: "failed",
-          error_message: error instanceof Error ? error.message : "Unknown error",
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", runId);
-    }
+    await updateRunStatus(supabase, runId, {
+      status: "failed",
+      error_message: appError.message,
+      result: { rollback_attempted: normalized?.rollback_on_error !== false, created },
+      finished_at: new Date().toISOString(),
+    });
 
-    return new Response(JSON.stringify({
+    return jsonResponse(appError.status, {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: appError.message,
+      code: appError.code,
+      details: appError.details,
       rollback_attempted: normalized?.rollback_on_error !== false,
       created,
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

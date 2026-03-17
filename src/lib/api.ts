@@ -25,12 +25,14 @@ export async function extractFileContent(fileUrls: string[], tenantId: string) {
 // ==================== CHAT ====================
 export async function sendChatMessage({
   tenantId,
+  agentId,
   message,
   conversationId,
   endUser,
   attachments,
 }: {
   tenantId: string;
+  agentId?: string;
   message: string;
   conversationId?: string;
   endUser?: { name?: string; email?: string; phone?: string; role?: string };
@@ -39,6 +41,7 @@ export async function sendChatMessage({
   const { data, error } = await supabase.functions.invoke("chat", {
     body: {
       tenant_id: tenantId,
+      agent_id: agentId,
       message,
       conversation_id: conversationId,
       end_user: endUser,
@@ -57,6 +60,7 @@ export async function sendChatMessage({
 // ==================== STREAMING CHAT ====================
 export async function sendChatMessageStream({
   tenantId,
+  agentId,
   message,
   conversationId,
   endUser,
@@ -66,6 +70,7 @@ export async function sendChatMessageStream({
   onError,
 }: {
   tenantId: string;
+  agentId?: string;
   message: string;
   conversationId?: string;
   endUser?: { name?: string; email?: string; phone?: string; role?: string };
@@ -88,6 +93,7 @@ export async function sendChatMessageStream({
       },
       body: JSON.stringify({
         tenant_id: tenantId,
+        agent_id: agentId,
         message,
         conversation_id: conversationId,
         end_user: endUser,
@@ -132,8 +138,13 @@ export async function sendChatMessageStream({
             convId = evt.conversation_id || convId;
             toolUsed = evt.tool_used;
             toolLatency = evt.tool_latency_ms;
+          } else if (evt.type === "error") {
+            throw new Error(evt.message || "Streaming error");
           }
-        } catch { /* skip malformed */ }
+        } catch (err) {
+          if (err instanceof Error) throw err;
+          /* skip malformed */
+        }
       }
     }
 

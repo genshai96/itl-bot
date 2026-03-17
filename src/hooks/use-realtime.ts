@@ -59,7 +59,8 @@ export function useRealtimeMessages(conversationId: string | undefined) {
 }
 
 /**
- * Subscribe to realtime handoff events
+ * Subscribe to realtime handoff events.
+ * Invalidates all ["handoff_events", *] queries (prefix match covers tenant-filtered queries).
  */
 export function useRealtimeHandoffs() {
   const qc = useQueryClient();
@@ -71,6 +72,7 @@ export function useRealtimeHandoffs() {
         "postgres_changes",
         { event: "*", schema: "public", table: "handoff_events" },
         () => {
+          // Prefix invalidation: refreshes both useHandoffEvents() and useHandoffEvents(tenantId)
           qc.invalidateQueries({ queryKey: ["handoff_events"] });
         }
       )

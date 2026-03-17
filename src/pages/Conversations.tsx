@@ -13,6 +13,7 @@ import { format, isAfter, subDays } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageCorrectionButton } from "@/components/chat/MessageCorrectionButton";
 import { IngestConversationButton } from "@/components/chat/IngestConversationButton";
+import { ChatMessageRenderer } from "@/components/chat/ChatMessageRenderer";
 
 const statusColors: Record<string, string> = {
   active: "bg-success",
@@ -307,7 +308,7 @@ const Conversations = () => {
                       </div>
                     )}
                     <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-bot"}>
-                      <p className="text-sm whitespace-pre-line">{msg.content}</p>
+                      <ChatMessageRenderer content={msg.content} role={msg.role === "user" ? "user" : "bot"} />
                       <div className={`flex items-center gap-2 mt-2 text-[10px] ${msg.role === "user" ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                         <span>{format(new Date(msg.created_at), "HH:mm")}</span>
                         {msg.confidence && (

@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import { validateFlow, FLOW_TEMPLATES, type ValidationError } from "@/lib/flow-v
 
 const FlowBuilder = () => {
   const qc = useQueryClient();
+  const [searchParams] = useSearchParams();
   const { data: tenants } = useTenants();
   const [selectedTenant, setSelectedTenant] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -37,6 +39,14 @@ const FlowBuilder = () => {
   const [canvasConfig, setCanvasConfig] = useState<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] });
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiGenerating, setAiGenerating] = useState(false);
+
+  // Pre-select tenant and flow from URL params (navigated from TenantDetail)
+  useEffect(() => {
+    const paramTenant = searchParams.get("tenant");
+    if (paramTenant && paramTenant !== selectedTenant) {
+      setSelectedTenant(paramTenant);
+    }
+  }, [searchParams]);
 
   const tenantId = selectedTenant || tenants?.[0]?.id || "";
 
@@ -53,6 +63,14 @@ const FlowBuilder = () => {
     },
     enabled: !!tenantId,
   });
+
+  // Pre-select a specific flow when ?flow= param is provided (navigated from TenantDetail)
+  useEffect(() => {
+    const paramFlow = searchParams.get("flow");
+    if (paramFlow && paramFlow !== selectedFlow) {
+      setSelectedFlow(paramFlow);
+    }
+  }, [searchParams, flows]);
 
   const { data: versions } = useQuery({
     queryKey: ["flow_versions", selectedFlow],

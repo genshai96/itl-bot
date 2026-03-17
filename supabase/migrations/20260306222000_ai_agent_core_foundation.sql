@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS public.memory_items (
 
 ALTER TABLE public.memory_items ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.memory_items
+  ALTER COLUMN user_ref SET NOT NULL,
+  ALTER COLUMN memory_key DROP NOT NULL,
+  ALTER COLUMN last_seen_at SET DEFAULT now();
+
+ALTER TABLE public.memory_items
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_items_active_key
   ON public.memory_items (tenant_id, user_ref, memory_key)
   WHERE status = 'active' AND memory_key IS NOT NULL;
@@ -95,6 +104,28 @@ CREATE TABLE IF NOT EXISTS public.memory_access_logs (
 );
 
 ALTER TABLE public.memory_access_logs ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.memory_access_logs
+  ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS score REAL;
+
+ALTER TABLE public.memory_access_logs
+  ALTER COLUMN user_ref SET NOT NULL;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'memory_access_logs'
+      AND column_name = 'conversation_id'
+      AND data_type = 'text'
+  ) THEN
+    ALTER TABLE public.memory_access_logs
+      ALTER COLUMN conversation_id TYPE UUID USING NULLIF(conversation_id, '')::uuid;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_memory_access_logs_tenant_time
   ON public.memory_access_logs (tenant_id, created_at DESC);
@@ -250,10 +281,12 @@ END $$;
 -- RLS policies
 -- ------------------------------
 -- Memory tables
+DROP POLICY IF EXISTS "Tenant members view memory items" ON public.memory_items;
 CREATE POLICY "Tenant members view memory items"
   ON public.memory_items FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage memory items" ON public.memory_items;
 CREATE POLICY "Tenant admins manage memory items"
   ON public.memory_items FOR ALL TO authenticated
   USING (
@@ -262,10 +295,12 @@ CREATE POLICY "Tenant admins manage memory items"
     OR public.is_system_admin(auth.uid())
   );
 
+DROP POLICY IF EXISTS "Tenant members view memory summaries" ON public.memory_summaries;
 CREATE POLICY "Tenant members view memory summaries"
   ON public.memory_summaries FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage memory summaries" ON public.memory_summaries;
 CREATE POLICY "Tenant admins manage memory summaries"
   ON public.memory_summaries FOR ALL TO authenticated
   USING (
@@ -274,10 +309,12 @@ CREATE POLICY "Tenant admins manage memory summaries"
     OR public.is_system_admin(auth.uid())
   );
 
+DROP POLICY IF EXISTS "Tenant members view memory conflicts" ON public.memory_conflicts;
 CREATE POLICY "Tenant members view memory conflicts"
   ON public.memory_conflicts FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage memory conflicts" ON public.memory_conflicts;
 CREATE POLICY "Tenant admins manage memory conflicts"
   ON public.memory_conflicts FOR ALL TO authenticated
   USING (
@@ -286,52 +323,64 @@ CREATE POLICY "Tenant admins manage memory conflicts"
     OR public.is_system_admin(auth.uid())
   );
 
+DROP POLICY IF EXISTS "Tenant members view memory access logs" ON public.memory_access_logs;
 CREATE POLICY "Tenant members view memory access logs"
   ON public.memory_access_logs FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "System insert memory access logs" ON public.memory_access_logs;
 CREATE POLICY "System insert memory access logs"
   ON public.memory_access_logs FOR INSERT TO authenticated
   WITH CHECK (true);
 
 -- Skills tables
+DROP POLICY IF EXISTS "Authenticated read skills registry" ON public.skills_registry;
 CREATE POLICY "Authenticated read skills registry"
   ON public.skills_registry FOR SELECT TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "System admins manage skills registry" ON public.skills_registry;
 CREATE POLICY "System admins manage skills registry"
   ON public.skills_registry FOR ALL TO authenticated
   USING (public.is_system_admin(auth.uid()));
 
+DROP POLICY IF EXISTS "Tenant members view skill bindings" ON public.tenant_skill_bindings;
 CREATE POLICY "Tenant members view skill bindings"
   ON public.tenant_skill_bindings FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage skill bindings" ON public.tenant_skill_bindings;
 CREATE POLICY "Tenant admins manage skill bindings"
   ON public.tenant_skill_bindings FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), tenant_id, 'tenant_admin') OR public.is_system_admin(auth.uid()));
 
 -- MCP tables
+DROP POLICY IF EXISTS "Authenticated read mcp servers" ON public.mcp_servers;
 CREATE POLICY "Authenticated read mcp servers"
   ON public.mcp_servers FOR SELECT TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "System admins manage mcp servers" ON public.mcp_servers;
 CREATE POLICY "System admins manage mcp servers"
   ON public.mcp_servers FOR ALL TO authenticated
   USING (public.is_system_admin(auth.uid()));
 
+DROP POLICY IF EXISTS "Tenant members view mcp bindings" ON public.tenant_mcp_bindings;
 CREATE POLICY "Tenant members view mcp bindings"
   ON public.tenant_mcp_bindings FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage mcp bindings" ON public.tenant_mcp_bindings;
 CREATE POLICY "Tenant admins manage mcp bindings"
   ON public.tenant_mcp_bindings FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), tenant_id, 'tenant_admin') OR public.is_system_admin(auth.uid()));
 
+DROP POLICY IF EXISTS "Tenant members view mcp tool policies" ON public.mcp_tool_policies;
 CREATE POLICY "Tenant members view mcp tool policies"
   ON public.mcp_tool_policies FOR SELECT TO authenticated
   USING (public.is_tenant_member(auth.uid(), tenant_id));
 
+DROP POLICY IF EXISTS "Tenant admins manage mcp tool policies" ON public.mcp_tool_policies;
 CREATE POLICY "Tenant admins manage mcp tool policies"
   ON public.mcp_tool_policies FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), tenant_id, 'tenant_admin') OR public.is_system_admin(auth.uid()));

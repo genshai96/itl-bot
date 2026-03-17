@@ -8,12 +8,15 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Tenants from "./pages/Tenants";
 import TenantDetail from "./pages/TenantDetail";
+import WorkspaceOverview from "./pages/WorkspaceOverview";
+import WorkspaceAgents from "./pages/WorkspaceAgents";
 import Conversations from "./pages/Conversations";
 import HandoffQueue from "./pages/HandoffQueue";
 import Settings from "./pages/Settings";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Analytics from "./pages/Analytics";
 import Agents from "./pages/Agents";
+import Operators from "./pages/Operators";
 import FlowBuilder from "./pages/FlowBuilder";
 import AuditLogs from "./pages/AuditLogs";
 import BotMemory from "./pages/BotMemory";
@@ -47,10 +50,18 @@ const App = () => (
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/tenants" element={<ProtectedRoute><Tenants /></ProtectedRoute>} />
             <Route path="/tenants/:tenantId" element={<ProtectedRoute><TenantDetail /></ProtectedRoute>} />
+
+            <Route path="/workspaces" element={<ProtectedRoute><Tenants /></ProtectedRoute>} />
+            <Route path="/workspaces/:workspaceId" element={<ProtectedRoute><WorkspaceOverview /></ProtectedRoute>} />
+            <Route path="/workspaces/:workspaceId/agents" element={<ProtectedRoute><WorkspaceAgents /></ProtectedRoute>} />
+            <Route path="/workspaces/:workspaceId/agents/:agentId" element={<ProtectedRoute><TenantDetail /></ProtectedRoute>} />
+            <Route path="/workspaces/:workspaceId/settings" element={<ProtectedRoute><TenantDetail /></ProtectedRoute>} />
+
             <Route path="/conversations" element={<ProtectedRoute><Conversations /></ProtectedRoute>} />
             <Route path="/handoff" element={<ProtectedRoute><HandoffQueue /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
+            <Route path="/operators" element={<ProtectedRoute><Operators /></ProtectedRoute>} />
             <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             <Route path="/flows" element={<ProtectedRoute><FlowBuilder /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute><AuditLogs /></ProtectedRoute>} />

@@ -8,6 +8,20 @@ type TenantConfig = Database["public"]["Tables"]["tenant_configs"]["Row"];
 type Conversation = Database["public"]["Tables"]["conversations"]["Row"];
 type Message = Database["public"]["Tables"]["messages"]["Row"];
 
+// Explicitly exported for use in HandoffQueue and sub-components
+export type HandoffEvent = Database["public"]["Tables"]["handoff_events"]["Row"];
+
+// Shared role type — mirrors the app_role DB enum
+export type AppRole = Database["public"]["Enums"]["app_role"];
+
+// UserRole row with joined profile
+export type UserRoleWithProfile = Database["public"]["Tables"]["user_roles"]["Row"] & {
+  profiles: Pick<
+    Database["public"]["Tables"]["profiles"]["Row"],
+    "display_name" | "user_id" | "avatar_url"
+  > | null;
+};
+
 // ==================== TENANTS ====================
 export function useTenants() {
   return useQuery({
@@ -301,7 +315,7 @@ export function useHandoffEvents(tenantId?: string) {
       if (tenantId) query = query.eq("tenant_id", tenantId);
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return (data ?? []) as HandoffEvent[];
     },
   });
 }
@@ -313,12 +327,12 @@ export function useUserRoles(tenantId?: string) {
     queryFn: async () => {
       let query = supabase
         .from("user_roles")
-        .select("*, profiles(display_name, user_id)")
+        .select("*, profiles(display_name, user_id, avatar_url)")
         .order("created_at", { ascending: false });
       if (tenantId) query = query.eq("tenant_id", tenantId);
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return (data ?? []) as UserRoleWithProfile[];
     },
   });
 }

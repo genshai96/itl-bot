@@ -100,9 +100,9 @@ const Tenants = () => {
       <div className="space-y-8 animate-slide-in">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Tenants</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Workspaces</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Quản lý tenant — mỗi tenant có KB, dữ liệu, model config riêng
+              Quản lý workspace — mỗi workspace hiện vẫn map xuống tenant data/model config riêng
             </p>
           </div>
           <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -181,7 +181,7 @@ const Tenants = () => {
               <div
                 key={tenant.id}
                 className="stat-card group cursor-pointer"
-                onClick={() => navigate(`/tenants/${tenant.id}`)}
+                onClick={() => navigate(`/workspaces/${tenant.id}`)}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
